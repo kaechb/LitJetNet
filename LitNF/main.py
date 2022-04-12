@@ -44,45 +44,78 @@ if __name__ == "__main__":
     resources = {"cpu": 10, "gpu": 0.3}
 
     hyperopt = False
-    config = {
-        "network_layers": 2,
-        "network_nodes": 128,
-        "batch_size": 2000,
-        "coupling_layers": 15,  # tune.uniform(3,20),#tune.randint(6,300),
-        "conditional": True,
-        "lr": 0.0001,
-        "batchnorm": False,
-        "autoreg": False,
-        "bins": 8,
-        "UMNN": False,
-        "tail_bound": 10,
-        "n_mse": 10,
-        "limit": 100000,
-        "n_dim": 90,
-        "dropout": 0.0,
-        "lr_schedule": False,
-        "gamma": 0.75,
-        "n_sched": 1000,
-        "canonical": False,
-        "max_steps": 10,
-        "lambda": 500,
-        "n_turnoff": 1000,
-        "name": "debug",
-        "disc": False
-    }
-
+    if not hyperopt:
+        config = {
+                "network_layers": 2,
+                "network_nodes": 128,
+                "batch_size": 2000,
+                "coupling_layers": 15,  # tune.uniform(3,20),#tune.randint(6,300),
+                "conditional": True,
+                "lr": 0.0001,
+                "batchnorm": False,
+                "autoreg": False,
+                "bins": 8,
+                "UMNN": False,
+                "tail_bound": 10,
+                "limit": 100000,
+                "n_dim": 90,
+                "dropout": 0.0,
+                "lr_schedule": False,
+                "gamma": 0.75,
+                "n_sched": 1000,
+                "canonical": False,
+                "max_steps": 10,
+                "lambda": 500,
+                "n_turnoff": 1000,
+                "name": "debug",
+                "disc": False
+        }
+    else:
+                reporter = CLIReporter(max_progress_rows=40,max_report_frequency=30, sort_by_metric=True,
+                metric="logprob",parameter_columns=["network_nodes","network_layers","coupling_layers","lr"])
+                 # Add a custom metric column, in addition to the default metrics.
+                # Note that this must be a metric that is returned in your training results.
+                reporter.add_metric_column("loss")
+                reporter.add_metric_column("w1p")
+                reporter.add_metric_column("w1efp")
+                reporter.add_metric_column("w1m")
+                config={
+                "network_layers":tune.randint(2,6),
+                "network_nodes":tune.randint(250,500),
+                "batch_size":500,
+                "coupling_layers":tune.randint(20,30),#40,#tune.uniform(3,20),#tune.randint(6,300),
+                "conditional":True,#tune.choice([True,False]),
+                "lr":tune.loguniform(0.005,0.00005),
+                "batchnorm":False,
+                "autoreg":False,
+                "bins":tune.randint(4,10),
+                "UMNN":False,
+                "tail_bound":tune.randint(3,10), 
+                "n_mse":10,
+                "limit":100000,
+                "n_dim":90,
+                "dropout":0.0,
+                "lr_schedule":False,
+                "gamma":0.75,
+                "n_sched":1000,
+                "canonical":False,
+                "max_steps":40000,
+                "lambda":tune.loguniform(1,500),
+                "n_turnoff":10000,
+                "name":"debug"
+                "disc": False
+                }
     data_module = JetNetDataloader(config)
-    train(config, data_module)
-    print("should start")
-    # ray.init("auto")
-    # result = tune.run(tune.with_parameters(
-    #     train,data_module=data_module),
-    #     resources_per_trial=resources,
-    #     config=config,
-    #     num_samples=num_samples,
-    #     progress_reporter=reporter,
-    #      #checkpoint_freq=100,  # Checkpoint every 100 epoch
-    #     local_dir="/beegfs/desy/user/kaechben/ray_results/"+config["name"],
-    #     verbose=2,
+    ray.init("auto")
+    result = tune.run(tune.with_parameters(
+            train,data_module=data_module),   
+            resources_per_trial=resources,
+            config=config,
+            num_samples=num_samples,
+            progress_reporter=reporter,
+             #checkpoint_freq=100,  # Checkpoint every 100 epoch
+            local_dir="/beegfs/desy/user/kaechben/ray_results/"+config["name"],
+            verbose=2,
 
-    # )
+        )
+
