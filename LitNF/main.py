@@ -40,9 +40,8 @@ def train(config, data_module=None,progbar=True):
 
 
 if __name__ == "__main__":
-        num_samples = 5
-        resources = {"cpu": 10, "gpu": 0.3}
-        hyperopt = True
+        
+        hyperopt = True #This sets to run a hyperparameter optimization with ray or just running the training once
         if not hyperopt:
                 config = {
                 "network_layers": 2,
@@ -74,10 +73,9 @@ if __name__ == "__main__":
                 data_module = JetNetDataloader(config)
                 train(config,data_module)
         else:
+                #This sets the logging in ray
                 reporter = CLIReporter(max_progress_rows=40,max_report_frequency=30, sort_by_metric=True,
                 metric="logprob",parameter_columns=["network_nodes","network_layers","coupling_layers","lr"])
-                 # Add a custom metric column, in addition to the default metrics.
-                # Note that this must be a metric that is returned in your training results.
                 reporter.add_metric_column("loss")
                 reporter.add_metric_column("w1p")
                 reporter.add_metric_column("w1efp")
@@ -105,15 +103,13 @@ if __name__ == "__main__":
                 "max_steps":40000,
                 "lambda":tune.loguniform(1,500),
                 "n_mse_delay":50,
-                "n_turnoff":10000,
+                "n_mse_turnoff":10000,
                 "name":"debug",
                 "disc": False,
                 "calc_massloss":True
                 }
                 data_module = JetNetDataloader(config)
-                print("pre init")
                 ray.init("auto")
-                print("post init")
                 result = tune.run(tune.with_parameters(
                         train,data_module=data_module),   
                         resources_per_trial=resources,
