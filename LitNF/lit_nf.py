@@ -7,7 +7,6 @@ import os
 import traceback
 import nflows as nf
 
-from nflows.flows.base import Flow
 from nflows.utils.torchutils import create_random_binary_mask
 from nflows.distributions.normal import ConditionalDiagonalNormal
 from nflows.transforms.base import CompositeTransform
@@ -43,8 +42,8 @@ from markdown import markdown
 from pytorch_lightning.loggers import TensorBoardLogger
 from collections import OrderedDict
 from ray import tune
-from .helpers import *
-from .plotting import *
+from helpers import *
+from plotting import *
 
 
 
@@ -63,10 +62,10 @@ class LitNF(pl.LightningModule):
                 in_features,
                 out_features,
                 hidden_features=self.config["network_nodes"],
-                context_features=1 if config["conditional"] else None,
+                context_features=1 if self.config["conditional"] else None,
                 num_blocks=self.config["network_layers"],
                 activation=self.config["activation"]  if "activation" in self.config.keys() else FF.relu,
-                dropout_probability=config["dropout"] if "dropout" in self.config.keys() else 0,
+                dropout_probability=self.config["dropout"] if "dropout" in self.config.keys() else 0,
                 use_batch_norm=self.config["batchnorm"] if "batchnorm" in self.config.keys() else 0,
 
                     )
@@ -102,7 +101,7 @@ class LitNF(pl.LightningModule):
                     features=self.n_dim,
                     num_blocks=self.config["network_layers"], 
                     hidden_features=self.config["network_nodes"],
-                    context_features=1 if config["conditional"] else None,
+                    context_features=1 if self.config["conditional"] else None,
                     tails='linear',
                     tail_bound=3,
                     num_bins=self.config["bins"],
@@ -135,7 +134,7 @@ class LitNF(pl.LightningModule):
         #Creates working flow model from the list of layer modules
         self.flows=CompositeTransform(self.flows)
         # Construct flow model
-        self.flow = base.Flow(distribution=self.q0, transform=self.flows)
+        self.flow = Flow(distribution=self.q0, transform=self.flows)
 
 
     def load_datamodule(self,data_module):
@@ -304,7 +303,7 @@ class LitNF(pl.LightningModule):
         self.metrics["w1efp"].append(0)    
         self.log("val_w1m",self.metrics["w1m"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1p",self.metrics["w1p"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.plot=plotting(model=self,gen=gen,true=true,config=config,step=self.global_step,logger=self.logger.experiment)
+        self.plot=plotting(model=self,gen=gen,true=true,config=self.config,step=self.global_step,logger=self.logger.experiment)
         if self.config["disc"]:
             with torch.no_grad():
                     self.plot.plot_scores(self.disc(true[:,:self.n_dim].to(self.device)).cpu().numpy(),self.disc(gen[:,:self.n_dim].to(self.device)).cpu().numpy(),save=True)
