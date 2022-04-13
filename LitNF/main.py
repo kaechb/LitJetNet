@@ -2,7 +2,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import pytorch_lightning as pl
 import os
 from plotting import plotting
-from lit_nf import Lit_NF
+from lit_nf import LitNF
 from jetnet_dataloader import JetNetDataloader
 from helpers import *
 from ray import tune
@@ -14,13 +14,13 @@ from pytorch_lightning.loggers import TensorBoardLogger
 hyperopt = True
 
 
-def train(config, data_module=None):
+def train(config, data_module=None,progbar=True):
     data_module = JetNetDataloader(config)
     model = LitNF(config)
 
     checkpoint_callbacks = [ModelCheckpoint(monitor="logpob", filename="best_loss-{}".format(
         config["n_dim"])), ModelCheckpoint(monitor="val_w1m", filename="best_mass-{}".format(config["n_dim"]))]
-    path = "/home/kaechben/JetNet_NF/lightning_logs/version_200/checkpoints/"
+    path = "/home/kaechben/JetNet_NF/LitJetNet/best_model/checkpoints/"
     ckpt = os.listdir(path)[0]
     model = model.load_from_checkpoint(path+ckpt)
     model.load_datamodule(data_module)
@@ -40,15 +40,14 @@ def train(config, data_module=None):
 
 
 if __name__ == "__main__":
-    num_samples = 500
-    resources = {"cpu": 10, "gpu": 0.3}
-
-    hyperopt = False
-    if not hyperopt:
-        config = {
+        num_samples = 5
+        resources = {"cpu": 10, "gpu": 0.3}
+        hyperopt = True
+        if not hyperopt:
+                config = {
                 "network_layers": 2,
                 "network_nodes": 128,
-                "batch_size": 2000,
+                        "batch_size": 2000,
                 "coupling_layers": 15,  # tune.uniform(3,20),#tune.randint(6,300),
                 "conditional": True,
                 "lr": 0.0001,
@@ -67,10 +66,14 @@ if __name__ == "__main__":
                 "max_steps": 10,
                 "lambda": 500,
                 "n_turnoff": 1000,
+                "n_mse_delay":50,
                 "name": "debug",
-                "disc": False
-        }
-    else:
+                "disc": False,
+                "calc_massloss":True
+                }
+                data_module = JetNetDataloader(config)
+                train(config,data_module)
+        else:
                 reporter = CLIReporter(max_progress_rows=40,max_report_frequency=30, sort_by_metric=True,
                 metric="logprob",parameter_columns=["network_nodes","network_layers","coupling_layers","lr"])
                  # Add a custom metric column, in addition to the default metrics.
@@ -101,21 +104,25 @@ if __name__ == "__main__":
                 "canonical":False,
                 "max_steps":40000,
                 "lambda":tune.loguniform(1,500),
+                "n_mse_delay":50,
                 "n_turnoff":10000,
-                "name":"debug"
-                "disc": False
+                "name":"debug",
+                "disc": False,
+                "calc_massloss":True
                 }
-    data_module = JetNetDataloader(config)
-    ray.init("auto")
-    result = tune.run(tune.with_parameters(
-            train,data_module=data_module),   
-            resources_per_trial=resources,
-            config=config,
-            num_samples=num_samples,
-            progress_reporter=reporter,
-             #checkpoint_freq=100,  # Checkpoint every 100 epoch
-            local_dir="/beegfs/desy/user/kaechben/ray_results/"+config["name"],
-            verbose=2,
+                data_module = JetNetDataloader(config)
+                print("pre init")
+                ray.init("auto")
+                print("post init")
+                result = tune.run(tune.with_parameters(
+                        train,data_module=data_module),   
+                        resources_per_trial=resources,
+                        config=config,
+                        num_samples=num_samples,
+                        progress_reporter=reporter,
+                        #checkpoint_freq=100,  # Checkpoint every 100 epoch
+                        local_dir="/beegfs/desy/user/kaechben/ray_results/"+config["name"],
+                        verbose=2,
 
-        )
+                        )
 

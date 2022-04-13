@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 import os
 import pandas as pd
 import numpy as np
-from .helpers import *
+from helpers import *
 
 import matplotlib.pyplot as plt
 
