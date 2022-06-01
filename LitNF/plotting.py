@@ -7,6 +7,10 @@ import numpy as np
 import hist
 from hist import Hist
 import traceback
+from helpers import mass
+import pandas as pd
+
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 class plotting():
     '''This is a class that takes care of  plotting steps in the script,
         It is initialized with the following arguments:
@@ -32,7 +36,7 @@ class plotting():
         #This is the distribution of one of [eta,phi,pt] of one particle of the n particles per jet: for example the pt of the 3rd particle
         #if save, the histograms are logged to tensorboard otherwise they are shown
         plt.switch_backend('agg')
-        name,label=["eta","phi","pt"],[r"$\eta^{rel}$",r"$\phi$",r"$p_T^{rel}$"]
+        name,label=["eta","phi","pt"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$"]
 
         for i in range(self.n_dim):
             a=np.quantile(self.test_set[:,i].numpy(),0)
@@ -74,8 +78,8 @@ class plotting():
         #if save, the histograms are logged to tensorboard otherwise they are shown
         data=self.test_set[:,:self.n_dim].reshape(-1,3).numpy()
         gen=self.gen[:,:self.n_dim].reshape(-1,3).numpy()
-        labels=[r"$\eta^{rel}$",r"$\phi$",r"$p_T^{rel}$"]
-        names=["eta","phi","pt"]
+        labels=[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$"]
+        names=["eta","p3hi","pt"]
         for index in [[0,1],[0,2],[1,2]]:
 
             fig,ax=plt.subplots(ncols=2,figsize=(16, 8))
@@ -104,7 +108,7 @@ class plotting():
                 plt.show()
  
         
-    def plot_mass(self,m,m_t,save=False,quantile=False):
+    def plot_mass(self,m,m_t,save=False,quantile=False,bins=15,plot_vline=True):
         #This creates a histogram of the inclusive distributions and calculates the mass of each jet
         #and creates a histogram of that
         #if save, the histograms are logged to tensorboard otherwise they are shown
@@ -114,21 +118,21 @@ class plotting():
 
 
         gen=self.gen[:,:self.n_dim].reshape(-1,3).numpy()
-        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi$",r"$p_T^{rel}$",r"$m_T^{rel}$"]):
+        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m_T^{rel}$"]):
             
             if v!="m":
                 a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
                 b=max(np.quantile(self.gen[:,i],0.999),np.quantile(self.test_set[:,i],0.999))     
-                h=hist.Hist(hist.axis.Regular(15,a,b))
-                h2=hist.Hist(hist.axis.Regular(15,a,b))
+                h=hist.Hist(hist.axis.Regular(bins,a,b))
+                h2=hist.Hist(hist.axis.Regular(bins,a,b))
                 h.fill(self.gen[:,i])
                 h2.fill(self.test_set[:,i])
                 i+=1
             else:
-                a=np.quantile(m_t,0.001)
-                b=np.quantile(m_t,0.999)
-                h=hist.Hist(hist.axis.Regular(15,a,b))
-                h2=hist.Hist(hist.axis.Regular(15,a,b))
+                a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
+                b=max(np.quantile(m_t,0.999),np.quantile(m,0.999))
+                h=hist.Hist(hist.axis.Regular(bins,a,b))
+                h2=hist.Hist(hist.axis.Regular(bins,a,b))
                 bins = h.axes[0].edges
                 h.fill(m)
                 h2.fill(m_t)
@@ -143,22 +147,25 @@ class plotting():
                     rp_denom_label="MC Simulation",
                     rp_uncert_draw_type="line",  # line or bar
                 )
-                if quantile and v=="m":
+                ax[0].set_xlabel("")
+                if quantile and v=="m" and plot_vline:
                     ax[0].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile gen",hatch="/")
                     ax[0].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile train')
-                    ax[0].set_xlabel("")
-                    ax[1].set_ylim(0.25,2)
-                    ax[0].set_xlim(a,b)
-                    ax[1].set_xlim(a,b)
-                    ax[0].legend(["Generated","Training","10% quantile Gen","10% quantile Train"] )
+                    
+                ax[1].set_ylim(0.25,2)
+                ax[0].set_xlim(a,b)
+
+                ax[1].set_xlim(a,b)
+                ax[0].legend(["Generated","Training","10% quantile Gen","10% quantile Train"] )
             except:
                 print("mass plot failed reverting to simple plot mass bins")
                 plt.close()
                 plt.figure()
                 _,b,_=plt.hist(m_t,15,label="Sim",alpha=0.5)
-                plt.hist(m,b,label="Sim",alpha=0.5)
+                plt.hist(m,b,label="Gen",alpha=0.5)
                 plt.legend()  
             hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+            
             plt.xlabel(name)
             plt.tight_layout(pad=2)
             if save:
@@ -170,7 +177,7 @@ class plotting():
     #             self.summary.close()
             else:
                 plt.show()
-                plt.xlabel(name)
+        
 
     def losses(self,save=False):
         '''This plots the different losses vs epochs'''
@@ -179,7 +186,7 @@ class plotting():
         plt.xlabel('step')
         plt.ylabel('loss')
         ln1=plt.plot(self.model.logprobs,label='log$(p_{gauss}(x_{data}))$')
-        if "calc_massloss" in self.config.keys() and self.config["calc_massloss"]<np.inf:
+        if "calc_massloss" in self.config.keys() and self.config["calc_massloss"]:
             plt.twinx()
             ln2=plt.plot(self.model.mlosses,label=r'mass mse $\times$ {}'.format(self.config["lambda"]),color='orange')
             plt.ylabel("MSE")
@@ -197,12 +204,14 @@ class plotting():
         '''This plots the score distribution of the discriminator evaluated on true (simulated) sample scores_T 
         and on generated samples scores_gen'''
         fig=plt.figure()
+        a=min(np.quantile(scores_gen,0.001),np.quantile(scores_T,0.001))
+        b=max(np.quantile(scores_gen,0.999),np.quantile(scores_T,0.999))
         hep.cms.label("Private Work",data=None,lumi=None,year=None)
         plt.xlabel('Score')
         plt.ylabel('Counts')
-        plt.title("Discriminator Prediction")
-        _,b,_=plt.hist(scores_T,label="Sim",alpha=0.5,bins=30)
-        plt.hist(scores_gen,b,label="Gen",alpha=0.5)
+        plt.suptitle("Discriminator Prediction")
+        _,b,_=plt.hist(scores_T,label="MC Sim",alpha=0.5,bins=np.linspace(a,b,30))
+        plt.hist(scores_gen,b,label="Flow Gen",alpha=0.5)
         plt.legend()
         plt.tight_layout(pad=2)
         if save:
@@ -210,3 +219,148 @@ class plotting():
 #             self.summary.close()
         else:
             plt.show()
+    def plot_cond(self,save=False):
+        
+        data_module=self.model.data_module
+        fig,ax=plt.subplots(1)
+        hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax )
+        c=torch.ones(N).reshape(-1,1)*(-1)
+        gen=self.model.flow.to("cpu").sample(1,c).reshape(-1,90).to("cpu")
+        gen=self.model.data_module.scaler.to("cpu").inverse_transform(torch.hstack((gen,torch.ones(N).reshape(-1,1))))
+        gen_trafo=torch.clone(gen)
+        m=mass(gen[:,:90])
+        gen=self.data_module.scaler.transform(torch.hstack((gen[:,:90],m.reshape(-1,1))))
+        m=gen[:,-1]
+        plt.ylabel("Counts [a.u.]")
+        plt.xlabel(r"$m^{scaled}$ [a.u]")
+        _,b,_=plt.hist((self.data_module.data)[:,-1].numpy(),bins=100,label="Training Data",alpha=0.5)
+        plt.hist(m.detach().numpy(),bins=b,label="$m_{cond}=%d$"%c.numpy()[0],alpha=0.5)
+        plt.legend()
+        plt.show()
+        gamma=0.2
+        gen_trafo=gen_trafo[:,:90].detach().numpy()[:N,:90]#
+        test_set_trafo=data_module.scaler.inverse_transform(data_module.test_set[(data_module.test_set[:,-1]<gamma+c[0])
+                                        &(data_module.test_set[:,-1]>c[0]-gamma)])[:N,:90].numpy()[:N,:]
+
+        for v,name in zip(["eta","phi","pt"],[r"$\eta^{rel}_{tot}$",r"$\phi^{rel}_{tot}$",r"$p_{T,tot}^{rel}$"]):
+            a=min(np.quantile(gen_trafo.reshape(-1,3)[:N,i],0.001),np.quantile(test_set_trafo.reshape(-1,3)[:N,i],0.001))
+            b=max(np.quantile(gen_trafo.reshape(-1,3)[:N,i],0.999),np.quantile(test_set_trafo.reshape(-1,3)[:N,i],0.999))     
+            h=hist.Hist(hist.axis.Regular(15,a,b))
+            h2=hist.Hist(hist.axis.Regular(15,a,b))
+            h.fill(gen_trafo.reshape(-1,3)[:N,i])
+            h2.fill(test_set_trafo.reshape(-1,3)[:N,i])
+            i+=1
+            fig,ax=plt.subplots(2,1,gridspec_kw={'height_ratios': [3, 1]},figsize=(14,14))
+            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+            main_ax_artists, sublot_ax_arists = h.plot_ratio(
+                h2,
+                ax_dict={"main_ax":ax[0],"ratio_ax":ax[1]},
+                rp_ylabel=r"Ratio",
+                rp_num_label="Generated $m^{scaled}_{cond}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
+                rp_denom_label="Simulated $m^{scaled}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
+                rp_uncert_draw_type="line",  # line or bar
+            )
+            ax[0].set_xlabel(None)
+            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+            plt.xlabel(name)
+            plt.tight_layout(pad=2)
+        if save:
+            self.summary.add_figure("scores",fig,self.step)
+#             self.summary.close()
+        else:
+            plt.show()
+
+    def plot_marg_cond(self,save=False):
+        
+        data_module=self.model.data_module
+        fig,ax=plt.subplots(1)
+        hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax )
+        c=torch.ones(N).reshape(-1,1)*(-1)
+        gen=self.model.flow.to("cpu").sample(1,c).reshape(-1,90).to("cpu")
+        gen=self.model.data_module.scaler.to("cpu").inverse_transform(torch.hstack((gen,torch.ones(N).reshape(-1,1))))
+        gen_trafo=torch.clone(gen)
+        m=mass(gen[:,:90])
+        gen=self.data_module.scaler.transform(torch.hstack((gen[:,:90],m.reshape(-1,1))))
+        m=gen[:,-1]
+        plt.ylabel("Counts [a.u.]")
+        plt.xlabel(r"$m^{scaled}$ [a.u]")
+        _,b,_=plt.hist((self.data_module.data)[:,-1].numpy(),bins=100,label="Training Data",alpha=0.5)
+        plt.hist(m.detach().numpy(),bins=b,label="$m_{cond}=%d$"%c.numpy()[0],alpha=0.5)
+
+        plt.legend()
+        plt.show()
+
+        gamma=0.2
+        gen_trafo=gen_trafo[:,:90].detach().numpy()[:N,:90]#
+        test_set_trafo=data_module.scaler.inverse_transform(data_module.test_set[(data_module.test_set[:,-1]<gamma+c[0])
+                                        &(data_module.test_set[:,-1]>c[0]-gamma)])[:N,:90].numpy()[:N,:]
+        i=0
+        for v,name in zip(["eta","phi","pt"],[r"$\eta_1^{rel}$",r"$\phi_1^{rel}$",r"$p_{1,T}^{rel}$"]):
+            a=min(np.quantile(gen_trafo[:N,i],0.001),np.quantile(test_set_trafo[:N,i],0.001))
+            b=max(np.quantile(gen_trafo[:N,i],0.999),np.quantile(test_set_trafo[:N,i],0.999))     
+            h=hist.Hist(hist.axis.Regular(15,a,b))
+            h2=hist.Hist(hist.axis.Regular(15,a,b))
+            h.fill(gen_trafo[:N,i])
+            h2.fill(test_set_trafo[:N,i])
+            i+=1
+            fig,ax=plt.subplots(2,1,gridspec_kw={'height_ratios': [3, 1]},figsize=(14,14))
+            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+            main_ax_artists, sublot_ax_arists = h.plot_ratio(
+                h2,
+                ax_dict={"main_ax":ax[0],"ratio_ax":ax[1]},
+                rp_ylabel=r"Ratio",
+                rp_num_label="Generated $m^{scaled}_{cond}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
+                rp_denom_label="Simulated $m^{scaled}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
+                rp_uncert_draw_type="line",  # line or bar
+            )
+            ax[0].set_xlabel(None)
+            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+            plt.xlabel(name)
+            plt.tight_layout(pad=2)
+            if save:
+                self.summary.add_figure("scores",fig,self.step)
+    #             self.summary.close()
+            else:
+                plt.show()
+    def plot_correlations(self):
+        #Plots correlations between all particles for i=0 eta,i=1 phi,i=2 pt
+        self.plot_corr(i=0)
+        self.plot_corr(i=1)
+        self.plot_corr(i=2)
+
+    def plot_corr(self,i=0,names=["$\eta^{rel}$","$\phi^{rel}$","$p_T$"],save=True):
+        if i==2:
+            c=1
+        else:
+            c=.25
+        df_g=pd.DataFrame(self.gen[:,:self.n_dim].detach().numpy()[:,range(i,90,3)])
+        df_h=pd.DataFrame(self.test_set[:,:self.n_dim].detach().numpy()[:,range(i,90,3)])
+        
+        fig,ax=plt.subplots(ncols=2,figsize=(30,15))
+        corr_g = ax[0].matshow(df_g.corr())
+        corr_g.set_clim(-c,c)
+        divider = make_axes_locatable(ax[0])
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        cbar=fig.colorbar(corr_g,cax=cax)
+
+        corr_h = ax[1].matshow(df_h.corr())
+        corr_h.set_clim(-c,c)
+        divider = make_axes_locatable(ax[1])
+
+        cax2 = divider.append_axes('right', size='5%', pad=0.05)
+        cbar=fig.colorbar(corr_h,cax=cax2)
+        plt.suptitle("{} Correlation between Particles".format(names[i]))
+        ax[0].set_title("Flow Generated")
+        ax[1].set_title("MC Simulated")
+        ax[0].set_xlabel("Particles")
+        ax[0].set_ylabel("Particles")
+        ax[1].set_xlabel("Particles")
+        ax[1].set_ylabel("Particles")
+        
+        if save:
+                title=["corr_eta","corr_phi","corr_pt"]
+                self.summary.add_figure(title[i],fig,self.step)
+                
+    #             self.summary.close()
+        else:
+                plt.show()
