@@ -6,7 +6,7 @@ import os
 import pandas as pd
 import numpy as np
 from helpers import *
-
+from nflows.distributions.base import Distribution
 import matplotlib.pyplot as plt
 
 class StandardScaler:
@@ -52,36 +52,46 @@ class JetNetDataloader(pl.LightningDataModule):
         self.batch_size=config["batch_size"]
     def setup(self,stage):
     # transforms for images
-        data_dir=os.environ["HOME"]+"/JetNet_NF/train_{}_jets.csv".format("t")
+        data_dir=os.environ["HOME"]+"/JetNet_NF/train_{}_jets.csv".format("q")
         data=pd.read_csv(data_dir,sep=" ",header=None)
         jets=[]
         limit=int(self.config["limit"]*1.1)
         
-        for njets in range(30,31):
+        for njets in range(1,31):
             masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
             df=data.loc[masks==njets,:]
             df=df.drop(np.arange(3,120,4),axis=1)
-
-            df=df.iloc[:,:3*njets]
+            df["n"]=njets
             if len(df)>0:
-                jets.append(df.values[:self.config["limit"]])
-        self.data=torch.tensor(jets[-1][:,:self.n_dim]).float()
+                jets.append(df[:self.config["limit"]])
+        for i in range(len(jets)):
+            if i==0:
+                self.data=torch.tensor(jets[i].values[:,:self.n_dim]).float()
+                self.n=torch.tensor(jets[i]["n"].values)
+            else:
+                x=torch.tensor(jets[i].values[:,:self.n_dim]).float()
+                n=torch.tensor(jets[i]["n"].values).float()
+                self.data=torch.vstack((self.data,x))
+                self.n=torch.vstack((self.n.reshape(-1,1),n.reshape(-1,1)))
+        
         self.scaler=StandardScaler()
         if self.config["canonical"]:
             self.data=preprocess(self.data)
-        if  self.config["conditional"]:
-            self.m=mass(self.data[:,:self.n_dim],self.config["canonical"]).reshape(-1,1)
+        
+        self.m=mass(self.data[:,:self.n_dim],self.config["canonical"]).reshape(-1,1)
       
         
         self.data=torch.hstack((self.data,self.m))
         self.scaler.fit(self.data)
         self.data=self.scaler.transform(self.data)
-       
-        self.data,self.test_set=train_test_split(self.data.numpy(),test_size=0.1)
+        self.data=torch.hstack((self.data,self.n))
+        # for i in range(30):
+        #     self.data[self.data[-1]==i,3*i:]=torch.normal(torch.zeros_like((self.data[-1]==i,90-3*i)))*1e-7
+        self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.1)
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
         assert (torch.isnan(self.data)).sum()==0
-        assert self.data.shape[1]==self.n_dim+1
+        assert self.data.shape[1]==self.n_dim+self.config["context_features"]
         # plt.hist(self.scaler.inverse_transform(torch.vstack((self.data,self.test_set)))[:,self.n_dim].numpy(),bins=30,alpha=0.3,label='reversescaled')
         # plt.hist(self.m.numpy(),bins=30,alpha=0.3,label='true')
         # plt.legend()

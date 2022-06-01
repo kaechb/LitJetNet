@@ -1,13 +1,18 @@
 import torch
 # from scipy import interpolate
 # from scipy.stats import norm
-def mass(data,canonical=False):
+from torch import optim
+def mass(data,n=None,canonical=False):
     if canonical:
         n_dim=data.shape[1]
         p=data.reshape(-1,n_dim//3,3)
+        if n:
+            for i in range(n):
+                p[n==i,i+1:,:]=0
         px=p[:,:,0]
         py=p[:,:,1]
         pz=p[:,:,2]
+        
         E=torch.sqrt(px**2+py**2+pz**2)
         E=E.sum(axis=1)**2
         p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
@@ -16,6 +21,9 @@ def mass(data,canonical=False):
     else:
         n_dim=data.shape[1]
         p=data.reshape(-1,n_dim//3,3)
+        if n:
+            for i in range(n):
+                p[n==i,i+1:,:]=0
         px=torch.cos(p[:,:,1])*p[:,:,2]
         py=torch.sin(p[:,:,1])*p[:,:,2]
         pz=torch.sinh(p[:,:,0])*p[:,:,2]
@@ -127,3 +135,18 @@ class Rational(torch.nn.Module):
         PQ = X @ self.coeffs
         output = torch.div(PQ[..., 0], PQ[..., 1])
         return output
+class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, warmup, max_iters):
+        self.warmup = warmup
+        self.max_num_iters = max_iters
+        super().__init__(optimizer)
+
+    def get_lr(self):
+        lr_factor = self.get_lr_factor(epoch=self.last_epoch)
+        return [base_lr * lr_factor for base_lr in self.base_lrs]
+
+    def get_lr_factor(self, epoch):
+        lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.max_num_iters))
+        if epoch <= self.warmup:
+            lr_factor *= epoch * 1.0 / self.warmup
+        return lr_factor
