@@ -6,50 +6,6 @@ from torch import optim
 from nflows.distributions.base import Distribution
 
 
-"""Note that this is not used because its bad"""
-class StandardNormalTemp(Distribution):
-        """A multivariate Normal with zero mean and a covariance that 
-            can be chosen to be any value.
-            From images generation it resulted that a lower variance gives 
-            better sample result - this did not show the same effect here"""
-        def __init__(self, shape,temp=1):
-            super().__init__()
-            self._shape = torch.Size(shape)
-            self.temp=temp
-            self.register_buffer("_log_z",
-                                 torch.tensor(0.5 * np.prod(shape) * np.log(2 * np.pi),
-                                              dtype=torch.float64),
-                                 persistent=False)
-
-        def _log_prob(self, inputs, context):
-            # Note: the context is ignored.
-            if inputs.shape[1:] != self._shape:
-                raise ValueError(
-                    "Expected input of shape {}, got {}".format(
-                        self._shape, inputs.shape[1:]
-                    )
-                )
-            neg_energy = -0.5 * \
-                torchutils.sum_except_batch(inputs ** 2, num_batch_dims=1)
-            return neg_energy - self._log_z
-
-        def _sample(self, num_samples, context):
-            if context is None:
-                return torch.normal(std=torch.ones(self._shape, device=self._log_z.device)*self.temp)
-            else:
-                # The value of the context is ignored, only its size and device are taken into account.
-                context_size = context.shape[0]
-                samples = torch.randn(context_size * num_samples, *self._shape,
-                                      device=context.device)
-                return torchutils.split_leading_dim(samples, [context_size, num_samples])
-
-        def _mean(self, context):
-            if context is None:
-                return self._log_z.new_zeros(self._shape)
-            else:
-                # The value of the context is ignored, only its size is taken into account.
-                return context.new_zeros(context.shape[0], *self._shape)
-
 
 
 
@@ -117,7 +73,7 @@ def fbar(f,x,minx,maxx):
         xbar[x<minx]=f(x[x<minx])*np.exp(-abs(x[x<minx]-minx))
         xbar[x>maxx]=f(x[x>maxx])*np.exp(-abs(maxx-x[x>maxx]))
         return xbar
-def mmd(x, y, kernel="rbf"):
+def mmd(x, y, device,kernel="rbf"):
     """Emprical maximum mean discrepancy. The lower the result
        the more evidence that distributions are the same.
 
@@ -184,18 +140,5 @@ class Rational(torch.nn.Module):
         PQ = X @ self.coeffs
         output = torch.div(PQ[..., 0], PQ[..., 1])
         return output
-class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
-    def __init__(self, optimizer, warmup, max_iters):
-        self.warmup = warmup
-        self.max_num_iters = max_iters
-        super().__init__(optimizer)
 
-    def get_lr(self):
-        lr_factor = self.get_lr_factor(epoch=self.last_epoch)
-        return [base_lr * lr_factor for base_lr in self.base_lrs]
 
-    def get_lr_factor(self, epoch):
-        lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.max_num_iters))
-        if epoch <= self.warmup:
-            lr_factor *= epoch * 1.0 / self.warmup
-        return lr_factor

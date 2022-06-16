@@ -222,7 +222,7 @@ class LitNF(pl.LightningModule):
                 self.mlosses.append(mloss.detach().cpu().numpy())
                 self.log("mass_loss", mloss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
         ##Normalizing Flow loss Normalizing Flow loss
-        g_loss = -self.flow.to(self.device).log_prob(x,c if self.config["context_features"] else None).mean()/self.n_dim °
+        g_loss = -self.flow.to(self.device).log_prob(x,c if self.config["context_features"] else None).mean()/self.n_dim
         self.log("logprob", g_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True) 
         self.logprobs.append(g_loss.detach().cpu().numpy())
         #some conditions on when we want to actually add the mass loss to our training loss, if we dont add it, it is as it wouldnt exist
