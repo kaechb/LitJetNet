@@ -81,14 +81,20 @@ class plotting():
         labels=[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$"]
         names=["eta","p3hi","pt"]
         for index in [[0,1],[0,2],[1,2]]:
-
+            
             fig,ax=plt.subplots(ncols=2,figsize=(16, 8))
-        
             _,x,y,_=ax[0].hist2d(data[:,index[0]],data[:,index[1]],bins=30)
-            y=np.abs(y)+0.00001
-            y = np.logspace(np.log(y[0]),np.log(y[-1]),len(y))
+            #rebin to only take 0.1% to 99.0% of signal dis
+            a=np.quantile(x,0.001)
+            b=np.quantile(x,0.999)
+            x=np.linspace(a,b,len(x))
+            a=np.quantile(y,0.001)
+            b=np.quantile(y,0.999)
+            y=np.linspace(a,b,len(y))
+            if index[1]==2:
+                y=np.abs(y)+0.00001
+                y = np.logspace(np.log(y[0]),np.log(y[-1]),len(y))
             ax[0].hist2d(data[:,index[0]],data[:,index[1]],bins=[x,y])
-
             data[:,index[0]]=np.abs(data[:,index[0]])+0.00001
             ax[1].hist2d(gen[:,index[0]],gen[:,index[1]],bins=[x,y])
         
@@ -219,109 +225,7 @@ class plotting():
 #             self.summary.close()
         else:
             plt.show()
-    def plot_cond(self,save=False):
-        
-        data_module=self.model.data_module
-        fig,ax=plt.subplots(1)
-        hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax )
-        c=torch.ones(N).reshape(-1,1)*(-1)
-        gen=self.model.flow.to("cpu").sample(1,c).reshape(-1,90).to("cpu")
-        gen=self.model.data_module.scaler.to("cpu").inverse_transform(torch.hstack((gen,torch.ones(N).reshape(-1,1))))
-        gen_trafo=torch.clone(gen)
-        m=mass(gen[:,:90])
-        gen=self.data_module.scaler.transform(torch.hstack((gen[:,:90],m.reshape(-1,1))))
-        m=gen[:,-1]
-        plt.ylabel("Counts [a.u.]")
-        plt.xlabel(r"$m^{scaled}$ [a.u]")
-        _,b,_=plt.hist((self.data_module.data)[:,-1].numpy(),bins=100,label="Training Data",alpha=0.5)
-        plt.hist(m.detach().numpy(),bins=b,label="$m_{cond}=%d$"%c.numpy()[0],alpha=0.5)
-        plt.legend()
-        plt.show()
-        gamma=0.2
-        gen_trafo=gen_trafo[:,:90].detach().numpy()[:N,:90]#
-        test_set_trafo=data_module.scaler.inverse_transform(data_module.test_set[(data_module.test_set[:,-1]<gamma+c[0])
-                                        &(data_module.test_set[:,-1]>c[0]-gamma)])[:N,:90].numpy()[:N,:]
 
-        for v,name in zip(["eta","phi","pt"],[r"$\eta^{rel}_{tot}$",r"$\phi^{rel}_{tot}$",r"$p_{T,tot}^{rel}$"]):
-            a=min(np.quantile(gen_trafo.reshape(-1,3)[:N,i],0.001),np.quantile(test_set_trafo.reshape(-1,3)[:N,i],0.001))
-            b=max(np.quantile(gen_trafo.reshape(-1,3)[:N,i],0.999),np.quantile(test_set_trafo.reshape(-1,3)[:N,i],0.999))     
-            h=hist.Hist(hist.axis.Regular(15,a,b))
-            h2=hist.Hist(hist.axis.Regular(15,a,b))
-            h.fill(gen_trafo.reshape(-1,3)[:N,i])
-            h2.fill(test_set_trafo.reshape(-1,3)[:N,i])
-            i+=1
-            fig,ax=plt.subplots(2,1,gridspec_kw={'height_ratios': [3, 1]},figsize=(14,14))
-            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            main_ax_artists, sublot_ax_arists = h.plot_ratio(
-                h2,
-                ax_dict={"main_ax":ax[0],"ratio_ax":ax[1]},
-                rp_ylabel=r"Ratio",
-                rp_num_label="Generated $m^{scaled}_{cond}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
-                rp_denom_label="Simulated $m^{scaled}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
-                rp_uncert_draw_type="line",  # line or bar
-            )
-            ax[0].set_xlabel(None)
-            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            plt.xlabel(name)
-            plt.tight_layout(pad=2)
-        if save:
-            self.summary.add_figure("scores",fig,self.step)
-#             self.summary.close()
-        else:
-            plt.show()
-
-    def plot_marg_cond(self,save=False):
-        
-        data_module=self.model.data_module
-        fig,ax=plt.subplots(1)
-        hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax )
-        c=torch.ones(N).reshape(-1,1)*(-1)
-        gen=self.model.flow.to("cpu").sample(1,c).reshape(-1,90).to("cpu")
-        gen=self.model.data_module.scaler.to("cpu").inverse_transform(torch.hstack((gen,torch.ones(N).reshape(-1,1))))
-        gen_trafo=torch.clone(gen)
-        m=mass(gen[:,:90])
-        gen=self.data_module.scaler.transform(torch.hstack((gen[:,:90],m.reshape(-1,1))))
-        m=gen[:,-1]
-        plt.ylabel("Counts [a.u.]")
-        plt.xlabel(r"$m^{scaled}$ [a.u]")
-        _,b,_=plt.hist((self.data_module.data)[:,-1].numpy(),bins=100,label="Training Data",alpha=0.5)
-        plt.hist(m.detach().numpy(),bins=b,label="$m_{cond}=%d$"%c.numpy()[0],alpha=0.5)
-
-        plt.legend()
-        plt.show()
-
-        gamma=0.2
-        gen_trafo=gen_trafo[:,:90].detach().numpy()[:N,:90]#
-        test_set_trafo=data_module.scaler.inverse_transform(data_module.test_set[(data_module.test_set[:,-1]<gamma+c[0])
-                                        &(data_module.test_set[:,-1]>c[0]-gamma)])[:N,:90].numpy()[:N,:]
-        i=0
-        for v,name in zip(["eta","phi","pt"],[r"$\eta_1^{rel}$",r"$\phi_1^{rel}$",r"$p_{1,T}^{rel}$"]):
-            a=min(np.quantile(gen_trafo[:N,i],0.001),np.quantile(test_set_trafo[:N,i],0.001))
-            b=max(np.quantile(gen_trafo[:N,i],0.999),np.quantile(test_set_trafo[:N,i],0.999))     
-            h=hist.Hist(hist.axis.Regular(15,a,b))
-            h2=hist.Hist(hist.axis.Regular(15,a,b))
-            h.fill(gen_trafo[:N,i])
-            h2.fill(test_set_trafo[:N,i])
-            i+=1
-            fig,ax=plt.subplots(2,1,gridspec_kw={'height_ratios': [3, 1]},figsize=(14,14))
-            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            main_ax_artists, sublot_ax_arists = h.plot_ratio(
-                h2,
-                ax_dict={"main_ax":ax[0],"ratio_ax":ax[1]},
-                rp_ylabel=r"Ratio",
-                rp_num_label="Generated $m^{scaled}_{cond}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
-                rp_denom_label="Simulated $m^{scaled}=%d\pm %1.2f$"%(c.numpy()[0],gamma),
-                rp_uncert_draw_type="line",  # line or bar
-            )
-            ax[0].set_xlabel(None)
-            hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            plt.xlabel(name)
-            plt.tight_layout(pad=2)
-            if save:
-                self.summary.add_figure("scores",fig,self.step)
-    #             self.summary.close()
-            else:
-                plt.show()
     def plot_correlations(self):
         #Plots correlations between all particles for i=0 eta,i=1 phi,i=2 pt
         self.plot_corr(i=0)

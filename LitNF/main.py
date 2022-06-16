@@ -15,6 +15,7 @@ from ray.tune import CLIReporter
 from pytorch_lightning.loggers import TensorBoardLogger
 from ray.tune.integration.pytorch_lightning import TuneReportCallback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from ray.tune.integration.pytorch_lightning import TuneReportCheckpointCallback
 import os
 def train(config, hyperopt=False, load_ckpt=None):
     # This function is a wrapper for the hyperparameter optimization module called ray 
@@ -23,22 +24,19 @@ def train(config, hyperopt=False, load_ckpt=None):
     # hyperopt:whether to optimizer hyper parameters - load_ckpt: path to checkpoint if used
     data_module = JetNetDataloader(config) #this loads the data
     model = LitNF(config) # the sets up the model,  config are hparams we want to optimize
-    # Callbacks to use during the training, we tuneautomatically checkpoint our models
-    callbacks = [ModelCheckpoint(monitor="val_logprob", filename="best_loss"), 
-                ModelCheckpoint(monitor="val_w1m", filename="best_mass"),
-              ]
-    if hyperopt:
-        metrics = {"val_w1m": "val_w1m", "val_w1p": "val_w1p", "val_logprob":"val_logprob"}
-        callbacks = [TuneReportCheckpointCallback(
-            metrics, on="validation_end")]#tune is the hyperparameter optimization library we use
+    # Callbacks to use during the training, we  checkpoint our models
+    callbacks = [ModelCheckpoint(monitor="val_logprob", filename='{epoch}-{val_logprob:.2f}-{val_w1m:.4f}', dirpath="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]) ]
     if load_ckpt:
         model = model.load_from_checkpoint(load_ckpt)
     model.load_datamodule(data_module)#adds datamodule to model
     model.config = config #config are our hyperparams, we make this a class property now
+
     if hyperopt: #Tune gives us an automatic logger for tensorboard
+        metrics = {"val_w1m": "val_w1m", "val_w1p": "val_w1p", "val_logprob":"val_logprob"}
+        callbacks = [TuneReportCheckpointCallback(
+            metrics, on="validation_end")]#tune is the hyperparameter optimization library we use
         logger = TensorBoardLogger(tune.get_trial_dir())
         callbacks.append(TuneReportCallback(
-
         {
             "logprob": "logprob",
             "w1m": "w1m",
@@ -112,34 +110,36 @@ if __name__ == "__main__":
         reporter.add_metric_column("val_w1efp")
         reporter.add_metric_column("val_w1m")
 
-        # config = {
-        #     "network_layers": tune.randint(2, 6),
-        #     "network_nodes": tune.randint(250, 500),
-        #     "batch_size": 5000,
-        #     "coupling_layers": tune.randint(5, 20),
-        #     "conditional": True,  # tune.choice([True,False]),
-        #     "lr": tune.loguniform(0.001, 0.00005),
-        #     "batchnorm": tune.choice([True,False]),
-        #     "bins": tune.randint(4, 10),
-        #     "UMNN": False,
-        #     "tail_bound": tune.randint(3, 10),
-        #     "limit": 100000,
-        #     "n_dim": 90,
-        #     "dropout": tune.uniform(0.0,0.5),
-        #     "lr_schedule": False,
-        #     "gamma": 0.75,
-        #     "n_sched": 1000,
-        #     "canonical": False,
-        #     "max_steps": 40000,
-        #     "lambda": tune.loguniform(1, 500),
-        #     "n_mse_delay": 500,
-        #     "n_mse_turnoff": 10000,
-        #     "name": "hyper",
-        #     "calc_massloss": True,
-        #     "context_features":2,
-        #     "variable":True,
-        #     "parton":"q"
-        # }
+        config = {
+            "network_layers": tune.randint(2, 6),
+            "network_nodes": tune.randint(250, 500),
+            "batch_size": 5000,
+            "coupling_layers": tune.randint(5, 20),
+            "conditional": True,  # tune.choice([True,False]),
+            "lr": tune.loguniform(0.001, 0.00005),
+            "batchnorm": tune.choice([True,False]),
+            "bins": tune.randint(4, 10),
+            "UMNN": False,
+            "tail_bound": tune.randint(3, 10),
+            "limit": 100000,
+            "n_dim": 90,
+            "dropout": tune.uniform(0.0,0.5),
+            "lr_schedule": False,
+            "gamma": 0.75,
+            "n_sched": 1000,
+            "canonical": False,
+            "max_steps": 40000,
+            "lambda": tune.loguniform(1, 500),
+            "n_mse_delay": 500,
+            "n_mse_turnoff": 10000,
+            "name": "hyper",
+            "calc_massloss": True,
+            "context_features":2,
+            "variable":True,
+            "parton":"q"
+        }
+        if config["variable"] and config["context_features"]<2:
+            raise
         data_module = JetNetDataloader(config)
         ray.init("auto") # This connects to the main ray node
         #this starts the training 
