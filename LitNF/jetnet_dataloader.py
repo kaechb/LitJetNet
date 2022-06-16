@@ -41,6 +41,7 @@ class StandardScaler:
         self.mean=self.mean.to(dev)
         return self
   
+
 class JetNetDataloader(pl.LightningDataModule):
     '''This is more or less standard boilerplate coded that builds the data loader of the training
        one thing to note is the custom standard scaler that works on tensors
@@ -51,54 +52,55 @@ class JetNetDataloader(pl.LightningDataModule):
         self.n_dim=config["n_dim"]
         self.batch_size=config["batch_size"]
     def setup(self,stage):
-    # transforms for images
-        data_dir=os.environ["HOME"]+"/JetNet_NF/train_{}_jets.csv".format("q")
+    # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
+    # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded ets
+        data_dir=os.environ["HOME"]+"/JetNet_NF/train_{}_jets.csv".format(self.config["parton"])
         data=pd.read_csv(data_dir,sep=" ",header=None)
         jets=[]
         limit=int(self.config["limit"]*1.1)
-        
         for njets in range(1,31):
             masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
             df=data.loc[masks==njets,:]
             df=df.drop(np.arange(3,120,4),axis=1)
             df["n"]=njets
-            if len(df)>0:
+            if len(df)>100:
                 jets.append(df[:self.config["limit"]])
+        self.n=torch.empty((0,1))
+        self.data=torch.empty((0,90))
         for i in range(len(jets)):
-            if i==0:
-                self.data=torch.tensor(jets[i].values[:,:self.n_dim]).float()
-                self.n=torch.tensor(jets[i]["n"].values)
-            else:
-                x=torch.tensor(jets[i].values[:,:self.n_dim]).float()
-                n=torch.tensor(jets[i]["n"].values).float()
-                self.data=torch.vstack((self.data,x))
-                self.n=torch.vstack((self.n.reshape(-1,1),n.reshape(-1,1)))
-        
+            x=torch.tensor(jets[i].values[:,:self.n_dim]).float()
+            n=torch.tensor(jets[i]["n"].values).float()
+            self.data=torch.vstack((self.data,x))
+            self.n=torch.vstack((self.n.reshape(-1,1),n.reshape(-1,1)))        
         self.scaler=StandardScaler()
         if self.config["canonical"]:
-            self.data=preprocess(self.data)
-        
-        self.m=mass(self.data[:,:self.n_dim],self.config["canonical"]).reshape(-1,1)
-      
-        
-        self.data=torch.hstack((self.data,self.m))
+            self.data=preprocess(self.data)        
+        self.m=mass(self.data[:,:self.n_dim],self.config["canonical"]).reshape(-1,1)  
+      # Adding noise to the mass of the jets.
+        for i in torch.unique(self.n):
+            i=int(i)
+            self.data[self.data[:,-1]==i,3*i:90]=torch.normal(mean=torch.zeros_like(self.data[self.data[:,-1]==i,3*i:90]),std=1).abs()*1e-7
+        if self.config["context_features"]:
+            self.data=torch.hstack((self.data,self.m))        
         self.scaler.fit(self.data)
         self.data=self.scaler.transform(self.data)
-        self.data=torch.hstack((self.data,self.n))
-        # for i in range(30):
-        #     self.data[self.data[-1]==i,3*i:]=torch.normal(torch.zeros_like((self.data[-1]==i,90-3*i)))*1e-7
+        if self.config["context_features"]>1:
+            self.data=torch.hstack((self.data,self.n))
+        
+        #calculating mass dist in different bins, this is needed for the testcase where we need to generate the conditoon
+        if self.config["variable"]:
+            self.mdists={}
+            for i in torch.unique(self.n):
+                self.mdists[int(i)]=F(self.data[self.data[:,-1]==i,-2])    
         self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.1)
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
         assert (torch.isnan(self.data)).sum()==0
         assert self.data.shape[1]==self.n_dim+self.config["context_features"]
-        # plt.hist(self.scaler.inverse_transform(torch.vstack((self.data,self.test_set)))[:,self.n_dim].numpy(),bins=30,alpha=0.3,label='reversescaled')
-        # plt.hist(self.m.numpy(),bins=30,alpha=0.3,label='true')
-        # plt.legend()
-        # plt.show()
-        
+
     def train_dataloader(self):
         return DataLoader(self.data, batch_size=self.batch_size)
+        
     def val_dataloader(self):
         return DataLoader(self.test_set, batch_size=len(self.test_set))
-        
+    

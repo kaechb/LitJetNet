@@ -83,13 +83,16 @@ class plotting():
         for index in [[0,1],[0,2],[1,2]]:
 
             fig,ax=plt.subplots(ncols=2,figsize=(16, 8))
+        
             _,x,y,_=ax[0].hist2d(data[:,index[0]],data[:,index[1]],bins=30)
-            
-            if index[1]==2:
-                
-                y = np.logspace(np.log(y[0]),np.log(y[-1]),len(y))
-                ax[0].hist2d(data[:,index[0]],gen[:,index[1]],bins=[x,y])
+            y=np.abs(y)+0.00001
+            y = np.logspace(np.log(y[0]),np.log(y[-1]),len(y))
+            ax[0].hist2d(data[:,index[0]],data[:,index[1]],bins=[x,y])
+
+            data[:,index[0]]=np.abs(data[:,index[0]])+0.00001
             ax[1].hist2d(gen[:,index[0]],gen[:,index[1]],bins=[x,y])
+        
+        
             plt.tight_layout(pad=2)
             ax[0].set_xlabel( labels[index[0]])
             ax[0].set_ylabel( labels[index[1]])
@@ -115,9 +118,6 @@ class plotting():
         #if quantile, this also creates a histogram of a subsample of the generated data, 
         # where the mass used to condition the flow is in the first 10% percentile of the simulated mass dist
         i=0
-
-
-        gen=self.gen[:,:self.n_dim].reshape(-1,3).numpy()
         for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m_T^{rel}$"]):
             
             if v!="m":
@@ -332,11 +332,11 @@ class plotting():
         if i==2:
             c=1
         else:
-            c=.25
+            c=1
         df_g=pd.DataFrame(self.gen[:,:self.n_dim].detach().numpy()[:,range(i,90,3)])
         df_h=pd.DataFrame(self.test_set[:,:self.n_dim].detach().numpy()[:,range(i,90,3)])
         
-        fig,ax=plt.subplots(ncols=2,figsize=(30,15))
+        fig,ax=plt.subplots(ncols=2,figsize=(20,10))
         corr_g = ax[0].matshow(df_g.corr())
         corr_g.set_clim(-c,c)
         divider = make_axes_locatable(ax[0])
