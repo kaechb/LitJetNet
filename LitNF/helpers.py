@@ -1,14 +1,63 @@
 import torch
-# from scipy import interpolate
-# from scipy.stats import norm
+from scipy import interpolate
+from scipy.stats import norm
+import numpy as np
 from torch import optim
-def mass(data,n=None,canonical=False):
+from nflows.distributions.base import Distribution
+
+
+"""Note that this is not used because its bad"""
+class StandardNormalTemp(Distribution):
+        """A multivariate Normal with zero mean and a covariance that 
+            can be chosen to be any value.
+            From images generation it resulted that a lower variance gives 
+            better sample result - this did not show the same effect here"""
+        def __init__(self, shape,temp=1):
+            super().__init__()
+            self._shape = torch.Size(shape)
+            self.temp=temp
+            self.register_buffer("_log_z",
+                                 torch.tensor(0.5 * np.prod(shape) * np.log(2 * np.pi),
+                                              dtype=torch.float64),
+                                 persistent=False)
+
+        def _log_prob(self, inputs, context):
+            # Note: the context is ignored.
+            if inputs.shape[1:] != self._shape:
+                raise ValueError(
+                    "Expected input of shape {}, got {}".format(
+                        self._shape, inputs.shape[1:]
+                    )
+                )
+            neg_energy = -0.5 * \
+                torchutils.sum_except_batch(inputs ** 2, num_batch_dims=1)
+            return neg_energy - self._log_z
+
+        def _sample(self, num_samples, context):
+            if context is None:
+                return torch.normal(std=torch.ones(self._shape, device=self._log_z.device)*self.temp)
+            else:
+                # The value of the context is ignored, only its size and device are taken into account.
+                context_size = context.shape[0]
+                samples = torch.randn(context_size * num_samples, *self._shape,
+                                      device=context.device)
+                return torchutils.split_leading_dim(samples, [context_size, num_samples])
+
+        def _mean(self, context):
+            if context is None:
+                return self._log_z.new_zeros(self._shape)
+            else:
+                # The value of the context is ignored, only its size is taken into account.
+                return context.new_zeros(context.shape[0], *self._shape)
+
+
+
+
+def mass(data,canonical=False):
+    
     if canonical:
         n_dim=data.shape[1]
         p=data.reshape(-1,n_dim//3,3)
-        if n:
-            for i in range(n):
-                p[n==i,i+1:,:]=0
         px=p[:,:,0]
         py=p[:,:,1]
         pz=p[:,:,2]
@@ -17,13 +66,11 @@ def mass(data,n=None,canonical=False):
         E=E.sum(axis=1)**2
         p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
         # return torch.sqrt(E-p) 
+
         return torch.sqrt(torch.max(E-p,torch.zeros(len(E)).to(E.device))) 
     else:
         n_dim=data.shape[1]
         p=data.reshape(-1,n_dim//3,3)
-        if n:
-            for i in range(n):
-                p[n==i,i+1:,:]=0
         px=torch.cos(p[:,:,1])*p[:,:,2]
         py=torch.sin(p[:,:,1])*p[:,:,2]
         pz=torch.sinh(p[:,:,0])*p[:,:,2]
@@ -31,6 +78,8 @@ def mass(data,n=None,canonical=False):
         E=E.sum(axis=1)**2
         p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
         m2=E-p
+        
+        assert m2.isnan().sum()==0  
         return torch.sqrt(torch.max(m2,torch.zeros(len(E)).to(E.device))) 
         
 def preprocess(data,rev=False):
@@ -49,10 +98,10 @@ def preprocess(data,rev=False):
             p[:,:,2]=data[:,:,2]*torch.sinh(data[:,:,0])
         return p.reshape(-1,n_dim)
 def F(x): #in: 1d array, out: functions transforming array to gauss
-   
+        print(len(x))
         ix= np.argsort(x)
         y=np.linspace(0,1,len(ix))
-        x=x[ix]#+np.random.rand(len(x))*0.01*np.random.rand(len(x))
+        x=x[ix]+np.random.rand(len(x))*0.01*np.random.rand(len(x))
         x=np.sort(x)
         
         fun=interpolate.PchipInterpolator(x,y)

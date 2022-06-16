@@ -2,7 +2,6 @@
 import traceback
 import os
 import nflows as nf
-from nflows.distributions.base import Distribution
 from nflows.utils.torchutils import create_random_binary_mask
 from nflows.transforms.base import CompositeTransform
 from nflows.transforms.coupling import *
@@ -11,12 +10,13 @@ from nflows.flows.base import Flow
 from nflows.flows import base
 from nflows.transforms.coupling import *
 from nflows.transforms.autoregressive import *
+from particle_net import ParticleNet
 import pytorch_lightning as pl
 import torch
 from torch import nn
 from torch.nn import functional as FF
 import numpy as np
-from jetnet.evaluation import w1p, w1efp, w1m, cov_mmd
+from jetnet.evaluation import w1p, w1efp, w1m, cov_mmd,fpnd
 import mplhep as hep
 import hist
 from hist import Hist
@@ -27,48 +27,13 @@ from helpers import *
 from plotting import *
 
 
-class StandardNormalTemp(Distribution):
-        """A multivariate Normal with zero mean and a covariance that 
-            can be chosen to be any value.
-            From images generation it resulted that a lower variance gives 
-            better sample result - this did not show the same effect here"""
-        def __init__(self, shape,temp=1):
-            super().__init__()
-            self._shape = torch.Size(shape)
-            self.temp=temp
-            self.register_buffer("_log_z",
-                                 torch.tensor(0.5 * np.prod(shape) * np.log(2 * np.pi),
-                                              dtype=torch.float64),
-                                 persistent=False)
+import numpy as np
+import torch
+from torch import nn
+from torch.nn import functional as F
 
-        def _log_prob(self, inputs, context):
-            # Note: the context is ignored.
-            if inputs.shape[1:] != self._shape:
-                raise ValueError(
-                    "Expected input of shape {}, got {}".format(
-                        self._shape, inputs.shape[1:]
-                    )
-                )
-            neg_energy = -0.5 * \
-                torchutils.sum_except_batch(inputs ** 2, num_batch_dims=1)
-            return neg_energy - self._log_z
 
-        def _sample(self, num_samples, context):
-            if context is None:
-                return torch.normal(std=torch.ones(self._shape, device=self._log_z.device)*self.temp)
-            else:
-                # The value of the context is ignored, only its size and device are taken into account.
-                context_size = context.shape[0]
-                samples = torch.randn(context_size * num_samples, *self._shape,
-                                      device=context.device)
-                return torchutils.split_leading_dim(samples, [context_size, num_samples])
 
-        def _mean(self, context):
-            if context is None:
-                return self._log_z.new_zeros(self._shape)
-            else:
-                # The value of the context is ignored, only its size is taken into account.
-                return context.new_zeros(context.shape[0], *self._shape)
 
 class LitNF(pl.LightningModule):
     
@@ -100,7 +65,7 @@ class LitNF(pl.LightningModule):
         self.config=config
         
         #Metrics to track during the training
-        self.metrics={"w1p":[],"w1m":[],"w1efp":[]}
+        self.metrics={"w1p":[],"w1m":[],"w1efp":[],"cov":[],"mmd":[],"fpnd":[]}
         #Loss function of the Normalizing flows
         self.logprobs=[]
 
@@ -118,16 +83,34 @@ class LitNF(pl.LightningModule):
             if "particle_masks" in self.config.keys() and self.config["particle_masks"] :
                 mask=create_random_binary_mask(self.n_dim//3)            
                 mask=mask.repeat_interleave(3)
-            self.flows += [PiecewiseRationalQuadraticCouplingTransform(
-            mask=mask,
-            transform_net_create_fn=self.create_resnet, 
-            tails='linear',
-            tail_bound=self.config["tail_bound"],
-            num_bins=self.config["bins"],
-                        )]
+            #Here are the coupling layers of the flow. There seem to be 3 choices but actually its more or less only 2
+            #The autoregressive one is incredibly slow while sampling which does not work together with the constraint
+            if self.config["spline"]:
+                self.flows += [PiecewiseRationalQuadraticCouplingTransform(
+                    mask=mask,
+                    transform_net_create_fn=self.create_resnet, 
+                    tails='linear',
+                    tail_bound=self.config["tail_bound"],
+                    num_bins=self.config["bins"] )]
+            elif self.config["autoreg"]:
+                self.flows += [MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
+                    features=self.n_dim,
+                    num_blocks=self.config["network_layers"], 
+                    hidden_features=self.config["network_nodes"],
+                    context_features=self.config["context_features"] ,
+                    tails='linear',
+                    tail_bound=self.config["tail_bound"],
+                    num_bins=self.config["bins"],
+                    use_residual_blocks=True,
+                    use_batch_norm=self.config["batchnorm"],
+                    activation=self.config["activation"])]
+            else:
+                self.flows+=[ AffineCouplingTransform(
+                    mask=mask,
+                    transform_net_create_fn=self.create_resnet)]
         #This sets the distribution in the latent space on which we want to morph onto        
         self.q0 = nf.distributions.normal.StandardNormal([self.n_dim])
-        self.q_test =StandardNormalTemp(shape=[self.n_dim],temp=0.8)
+        self.q_test =nf.distributions.normal.StandardNormal([self.n_dim])
         #Creates working flow model from the list of layer modules
         self.flows=CompositeTransform(self.flows)
         # Construct flow model
@@ -138,9 +121,9 @@ class LitNF(pl.LightningModule):
         '''this builds a discriminator that can be used to distinguish generated from real
         data, optimally we would want it to have a 50% accuracy, meaning it can distinguish
         This is just a Feed Forward Neural Network
-        The wgan keyword makes it a Wasserstein type of discriminator/critic'''
+        The wgan keyword makes it a Wasserstein type of discriminator/critic
+        I played around with this but it did not work particularly well'''
         if config:
-            if config["particle_net"]:
                 settings = {
                 "conv_params": [
                     (8, (64, 64, 64)),
@@ -158,19 +141,27 @@ class LitNF(pl.LightningModule):
 
 
     def load_datamodule(self,data_module):
-        '''needed for lightning training to work'''
+        '''needed for lightning training to work, it just sets the dataloader for training and validation'''
         self.data_module=data_module
         
-    
+    def on_after_backward(self) -> None:
+        '''This is a genious little hook, sometimes my model dies, i have no clue why. This saves the training from crashing and continues'''
+        valid_gradients = True
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                valid_gradients = not (torch.isnan(param.grad).any() or torch.isinf(param.grad).any())
+                if not valid_gradients:
+                    break
+        if not valid_gradients:
+            self.zero_grad()
     def sampleandscale(self,batch,c=None,n=None):
         '''This is a helper function that samples from the flow (i.e. generates a new sample) 
             and reverses the standard scaling that is done in the preprocessing. This allows to calculate the mass
-            on the generative sample and to compare to the simulated one''' 
-            
-        
+            on the generative sample and to compare to the simulated one, we need to inverse the scaling before calculating the mass
+            because calculating the mass is a non linear transformation and does not commute with the mass calculation''' 
         x= batch[:,:self.n_dim].to(self.device),
-        if self.config["context_features"]>0:
-            n_c=self.config["context_features"]
+        n_c=self.config["context_features"]
+        if n_c>0:            
             c= batch[:,self.n_dim:].reshape(-1,n_c).to(self.device) if c==None else c
             gen=self.flow.sample(1,c.reshape(-1,n_c)).reshape(-1,self.n_dim).to(self.device)
         else:
@@ -198,74 +189,120 @@ class LitNF(pl.LightningModule):
         #mlosses are initialized with None during the time it is not turned on, makes it easier to plot
         self.mlosses=[None for i in range(min(self.config["n_mse_delay"],self.config["max_steps"]))]
         self.n_dim=self.config["n_dim"]  
-        opt_g = torch.optim.Adam(self.flow.parameters(), lr=self.lr)
+        opt_g = torch.optim.AdamW(self.flow.parameters(), lr=self.lr)
+        self.opt_g=opt_g
         return (
         {'optimizer': opt_g, 'frequency': 1},
     )
-
+    def test_cond(self,num):
+        """this sampels mass and number particle conditions in an autoregressive manner needed for data generation, 
+            First the number particles are sampeled randomly from the pmf, and then the mass distribution for every case with 
+            n particles is calculated - this distribution is then interpolated and a 1d flows is constructed """
+        ns=self.data_module.n[torch.randint(low=0,high=len(self.data_module.n),size=(num,))]
+        c=torch.empty((0,2))
+        counts=torch.unique(ns,return_counts=True)
+        for n,count in zip(counts[0],counts[1]):
+            m_temp=torch.tensor(self.data_module.mdists[int(n)][1](torch.rand(size=(count,)).numpy())).reshape(-1,1).float()
+            n_temp=torch.tensor(int(n)).repeat(count).reshape(-1,1)
+            c_temp=torch.hstack((m_temp,n_temp))
+            c=torch.vstack((c,c_temp))
+        return c
     def training_step(self, batch, batch_idx,optimizer_idx=0,wgan=False):
-                
+        """training loop of the model, here all the data is passed forward to a gaussian
+            This is the important part what is happening here. This is all the training we do """
         x,c= batch[:,:self.n_dim],batch[:,self.n_dim:]
-       
+        self.opt_g.zero_grad()
         
-        if self.config["calc_massloss"]  :# and self.global_step//10==0   
-            self.gen,self.true,self.m,self.m_g=self.sampleandscale(batch,c=c)
-            mloss=FF.mse_loss(self.m_g.to(self.device).reshape(-1),self.m.to(self.device).reshape(-1))
-            self.mlosses.append(mloss.detach().cpu().numpy())
-            self.log("mass_loss", mloss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        # This is the mass constraint, which constrains the flow to generate events with a mass which is the same as the mass it has been conditioned on, we can choose to not calculate this when we work without mass constraint to make training faster
+        if self.config["calc_massloss"]  :
+                self.gen,self.true,self.m,self.m_g=self.sampleandscale(batch,c=c)
 
-#           
-        
-#             self.mlosses.append(mloss.detach().cpu().numpy())
-        g_loss = -self.flow.to("cuda").log_prob(x,c if self.config["context_features"] else None).mean()/self.n_dim #This is the classic Normalizing Flow loss
+                mloss=FF.mse_loss(self.m_g.to(self.device).reshape(-1),self.m.to(self.device).reshape(-1))
+                assert not torch.any(self.m_g.isnan()) or not torch.any(self.m.isnan())
+                self.mlosses.append(mloss.detach().cpu().numpy())
+                self.log("mass_loss", mloss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        ##Normalizing Flow loss Normalizing Flow loss
+        g_loss = -self.flow.to(self.device).log_prob(x,c if self.config["context_features"] else None).mean()/self.n_dim °
         self.log("logprob", g_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True) 
         self.logprobs.append(g_loss.detach().cpu().numpy())
-        
-        if self.global_step>self.config["n_mse_delay"] and self.config["context_features"]>0:
-        #the mass loss is an interesting metric, if we dont add it to the generator loss it will not influence the training
-
+        #some conditions on when we want to actually add the mass loss to our training loss, if we dont add it, it is as it wouldnt exist
+        if self.global_step>self.config["n_mse_delay"] and self.config["context_features"]>0 and self.config["calc_massloss"]:
             g_loss+=self.config["lambda"]*mloss
             self.log("combined_loss", g_loss, on_epoch=True, prog_bar=True, logger=True)
         self.losses.append(g_loss.detach().cpu().numpy())
         return OrderedDict({"loss":g_loss})
         
-
     def validation_step(self, batch, batch_idx):
-        '''This calculates some important metrics on the hold out set'''
+        '''This calculates some important metrics on the hold out set (checking for overtraining)'''
         self.data_module.scaler.to("cpu")  
-#         batch_cloud=Batch().from_data_list([Data(x=batch[i,:90].reshape(30,3),pos=batch[i,:90].reshape(30,3)) for i in range(len(batch))])#
-        
+        batch=batch.to("cpu")
+        c=batch[:,-self.config["context_features"]:] #this is the condition
+        c_test=self.test_cond(len(batch))#this is the condition in the case of testing
         with torch.no_grad():
             if self.config["context_features"]:
-                gen=self.flow_test.to("cpu").sample(1,batch[:,self.n_dim:].reshape(-1,self.config["context_features"]).to("cpu"))  
-                gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))
+                gen=self.flow_test.to("cpu").sample(1,c).to("cpu")
+                test=self.flow_test.to("cpu").sample(1,c_test.float()).to("cpu")
+                gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
+                test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
             else:
                 gen=self.flow.to("cpu").sample(len(batch)).to("cpu")
+                test=self.flow.to("cpu").sample(len(batch)).to("cpu")
+        # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
+        test=self.data_module.scaler.inverse_transform(test)
         gen=self.data_module.scaler.inverse_transform(gen)
+        true=self.data_module.scaler.inverse_transform(batch[:,:self.n_dim+1])
+        # We overwrite in cases where n is smaller 30 the particles after n with 0
         if self.config["context_features"]>1:
             for i in torch.unique(batch[:,-1]):
                 i=int(i)
-                gen[batch[:,-1]==i,3*i:]=0
-        batch=batch.to("cpu")
+                gen[c[:,-1]==i,3*i:]=0
+                test[c_test[:,-1]==i,3*i:-1]=0
+        true=true[:,:self.n_dim]
+        #This is just a nice check to see whether we overtrain 
         logprob = -self.flow.to("cpu").log_prob(batch[:,:self.n_dim],batch[:,self.n_dim:]).detach().mean().numpy()/self.n_dim
         
-        true=self.data_module.scaler.inverse_transform(batch[:,:self.n_dim+1].cpu())
-        m_t=mass(true[:,:self.n_dim].to(self.device))
-        m_gen=mass(gen[:,:self.n_dim],self.config["canonical"])
+        #calculate mass distrbutions & concat them to training sample
+        m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
+        m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
+        m_test=mass(test[:,:self.n_dim],self.config["canonical"]).cpu()
         gen=torch.column_stack((gen[:,:90],m_gen))
-        
+        test=torch.column_stack((test[:,:90],m_test))       
+        # Again checking for overtraining
+        mse=FF.mse_loss(m_t,m_test).detach()
+
+        if self.config["canonical"]:
+            gen[:,:90]=preprocess(gen[:,:90],rev=True)
+            test[:,:90]=preprocess(test[:,:90],rev=True)
+        # For one metric the pt needs to always be bigger or equal 0, so we overwrite the cases where it isnt (its not physical possible to ahve pt smaller 0)
+        for i in range(30):
+            i=2+3*i
+            gen[gen[:,i]<0,i]=0
+            test[test[:,i]<0,i]=0
+            true[true[:,i]<0,i]=0
+        #Some metrics we track
+        cov,mmd=cov_mmd(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3),use_tqdm=False)
+        fpndv=fpnd(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),use_tqdm=False,jet_type=self.config["parton"])
+
+        self.metrics["fpnd"].append(fpndv)
+        self.metrics["mmd"].append(mmd)
+        self.metrics["cov"].append(cov)
         self.metrics["w1p"].append(w1p(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
         self.metrics["w1m"].append(w1m(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
         self.metrics["w1efp"].append(w1efp(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
+        
         self.log("val_w1m",self.metrics["w1m"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1p",self.metrics["w1p"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1efp",self.metrics["w1efp"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_logprob",logprob,prog_bar=True,logger=True)
-        
-        self.plot=plotting(model=self,gen=gen[:,:self.n_dim],true=true[:,:self.n_dim],config=self.config,step=self.global_step,logger=self.logger.experiment)
-        self.flow=self.flow.to("cuda")
+        self.log("val_cov",cov,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        self.log("val_fpnd",fpndv,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        self.log("val_mmd",mmd,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        self.log("val_mse",mse,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        # This part here adds the plots to tensorboard
+        self.plot=plotting(model=self,gen=test[:,:self.n_dim],true=true[:,:self.n_dim],config=self.config,step=self.global_step,logger=self.logger.experiment)
+        self.flow=self.flow.to(self.device)
         try:
-            self.plot.plot_mass(m_gen.cpu().numpy(),m_t.cpu().numpy(),save=True,bins=30,quantile=True,plot_vline=False)
+            self.plot.plot_mass(m_test.cpu().numpy(),m_t.cpu().numpy(),save=True,bins=30,quantile=True,plot_vline=False)
 #             self.plot.plot_marginals(save=True)
             self.plot.plot_2d(save=True)
             self.plot.losses(save=True)
