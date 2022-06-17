@@ -84,12 +84,12 @@ class plotting():
             
             fig,ax=plt.subplots(ncols=2,figsize=(16, 8))
             _,x,y,_=ax[0].hist2d(data[:,index[0]],data[:,index[1]],bins=30)
-            #rebin to only take 0.1% to 99.0% of signal dis
-            a=np.quantile(x,0.001)
-            b=np.quantile(x,0.999)
+            #rebin to only take 5% to 95.0% of signal dis
+            a=np.quantile(x,0.05)
+            b=np.quantile(x,0.95)
             x=np.linspace(a,b,len(x))
-            a=np.quantile(y,0.001)
-            b=np.quantile(y,0.999)
+            a=np.quantile(y,0.05)
+            b=np.quantile(y,0.95)
             y=np.linspace(a,b,len(y))
             if index[1]==2:
                 y=np.abs(y)+0.00001
@@ -268,3 +268,5 @@ class plotting():
     #             self.summary.close()
         else:
                 plt.show()
+
+    #plot_var_part(self,)
