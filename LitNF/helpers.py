@@ -34,7 +34,6 @@ def mass(data,canonical=False):
         E=E.sum(axis=1)**2
         p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
         m2=E-p
-        
         assert m2.isnan().sum()==0  
         return torch.sqrt(torch.max(m2,torch.zeros(len(E)).to(E.device))) 
         
@@ -54,7 +53,6 @@ def preprocess(data,rev=False):
             p[:,:,2]=data[:,:,2]*torch.sinh(data[:,:,0])
         return p.reshape(-1,n_dim)
 def F(x): #in: 1d array, out: functions transforming array to gauss
-        print(len(x))
         ix= np.argsort(x)
         y=np.linspace(0,1,len(ix))
         x=x[ix]+np.random.rand(len(x))*0.01*np.random.rand(len(x))
