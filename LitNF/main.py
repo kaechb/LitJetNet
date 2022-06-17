@@ -63,38 +63,38 @@ def train(config, hyperopt=False, load_ckpt=None):
 if __name__ == "__main__":
 
     hyperopt = False  # This sets to run a hyperparameter optimization with ray or just running the training once
+
+    config = {
+        "network_layers": 2,  # sets amount hidden layers in transformation networks
+        "network_nodes": 256,  # amount nodes in hidden layers in transformation networks
+        "batch_size": 7500,  # sets batch size
+        "coupling_layers": 10,  # amount of invertible transformations to use
+        "lr": 0.001,  # sets learning rate
+        "batchnorm": False,  # use batchnorm or not
+        "bins": 8,  # amount of bins to use in rational quadratic splines
+        "UMNN": False,  # whether to use monotonic network instead of splines in trafo
+        "tail_bound": 6,  # splines:max value that is transformed, over this value theree is id
+        "limit": 100000,  # how many data points to use, test_set is 10% of this
+        "n_dim": 90,  # how many dimensions to use or equivalently /3 gives the amount of particles to use
+        "dropout": 0.4,  # use droput proportion, for 0 there is no dropout
+        "lr_schedule": False,  # whether tos chedule the learning rate
+        "gamma": 0.75,  # gamma that is annealing the learning rate
+        "n_sched": 1000,  # how many steps between an annealing step
+        "canonical": False,  # transform data coordinates to px,py,pz
+        "max_steps": 10000,  # how many steps to use at max
+        "lambda": 10,  # balance between massloss and nll
+        "n_mse_turnoff": 1000,  # when to turn off mass loss
+        "n_mse_delay": 5,  # when to turn on mass loss
+        "name": "pointflow",  # name for logging folder
+        "disc": False,  # whether to train gan style discriminator that decides whether point is simulated or generated
+        "calc_massloss": False, # whether to calculate mass loss, makes training slower, do not use with autoregressive!
+        "context_features":2, #amount of variables used for conditioning, for 0 no conditioning is used, for 1 only the mass is used, for 2 also the number part is used
+        "variable":1, #use variable amount of particles otherwise only use 30, options are true or false 
+        "spline":True,#whether to use splines or not, can also be set to "autoregressive" but they are unstable
+        "parton":"q" #choose the dataset you want to train options: t for top,q for quark,g for gluon
+    }
     if not hyperopt:
-        config = {
-            "network_layers": 2,  # sets amount hidden layers in transformation networks
-            "network_nodes": 256,  # amount nodes in hidden layers in transformation networks
-            "batch_size": 7500,  # sets batch size
-            "coupling_layers": 10,  # amount of invertible transformations to use
-            "lr": 0.001,  # sets learning rate
-            "batchnorm": False,  # use batchnorm or not
-            "bins": 8,  # amount of bins to use in rational quadratic splines
-            "UMNN": False,  # whether to use monotonic network instead of splines in trafo
-            "tail_bound": 6,  # splines:max value that is transformed, over this value theree is id
-            "limit": 100000,  # how many data points to use, test_set is 10% of this
-            "n_dim": 90,  # how many dimensions to use or equivalently /3 gives the amount of particles to use
-            "dropout": 0.4,  # use droput proportion, for 0 there is no dropout
-            "lr_schedule": False,  # whether tos chedule the learning rate
-            "gamma": 0.75,  # gamma that is annealing the learning rate
-            "n_sched": 1000,  # how many steps between an annealing step
-            "canonical": False,  # transform data coordinates to px,py,pz
-            "max_steps": 10000,  # how many steps to use at max
-            "lambda": 10,  # balance between massloss and nll
-            "n_mse_turnoff": 1000,  # when to turn off mass loss
-            "n_mse_delay": 5,  # when to turn on mass loss
-            "name": "pointflow",  # name for logging folder
-            "disc": False,  # whether to train gan style discriminator that decides whether point is simulated or generated
-            "calc_massloss": False, # whether to calculate mass loss, makes training slower, do not use with autoregressive!
-            "context_features":2, #amount of variables used for conditioning, for 0 no conditioning is used, for 1 only the mass is used, for 2 also the number part is used
-            "variable":1, #use variable amount of particles otherwise only use 30, options are true or false 
-            "spline":True,#whether to use splines or not, can also be set to "autoregressive" but they are unstable
-            "parton":"q" #choose the dataset you want to train options: t for top,q for quark,g for gluon
-        }
-        if config["variable"] and config["context_features"]<2:
-            raise
+        
         data_module = JetNetDataloader(config)
         train(config,hyperopt=hyperopt)
     else:
