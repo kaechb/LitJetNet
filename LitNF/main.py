@@ -54,7 +54,7 @@ def train(config, hyperopt=False, load_ckpt=None):
     
     trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=10,  # auto_scale_batch_size="binsearch",
                           max_steps=config["max_steps"], callbacks=callbacks, #progress_bar_refresh_rate=0,
-                          check_val_every_n_epoch=10,track_grad_norm=2,num_sanity_val_steps=1,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
+                          check_val_every_n_epoch=10,track_grad_norm=2,num_sanity_val_steps=50,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
                          fast_dev_run=False)
     # This calls the fit function which trains the model
     trainer.fit(model, train_dataloaders=data_module  )  
@@ -71,7 +71,6 @@ if __name__ == "__main__":
             "coupling_layers": 10,  # amount of invertible transformations to use
             "lr": 0.001,  # sets learning rate
             "batchnorm": False,  # use batchnorm or not
-            "autoreg": False,  # whether to use autoregressive transform, alot slower together with calc_massloss or massloss
             "bins": 8,  # amount of bins to use in rational quadratic splines
             "UMNN": False,  # whether to use monotonic network instead of splines in trafo
             "tail_bound": 6,  # splines:max value that is transformed, over this value theree is id
@@ -88,10 +87,10 @@ if __name__ == "__main__":
             "n_mse_delay": 5,  # when to turn on mass loss
             "name": "pointflow",  # name for logging folder
             "disc": False,  # whether to train gan style discriminator that decides whether point is simulated or generated
-            "calc_massloss": True, # whether to calculate mass loss, makes training slower, do not use with autoregressive!
+            "calc_massloss": False, # whether to calculate mass loss, makes training slower, do not use with autoregressive!
             "context_features":2, #amount of variables used for conditioning, for 0 no conditioning is used, for 1 only the mass is used, for 2 also the number part is used
             "variable":1, #use variable amount of particles otherwise only use 30, options are true or false 
-            "spline":True,#whether to use splines or not.
+            "spline":True,#whether to use splines or not, can also be set to "autoregressive" but they are unstable
             "parton":"q" #choose the dataset you want to train options: t for top,q for quark,g for gluon
         }
         if config["variable"] and config["context_features"]<2:
@@ -110,36 +109,16 @@ if __name__ == "__main__":
         reporter.add_metric_column("val_w1efp")
         reporter.add_metric_column("val_w1m")
 
-        config = {
-            "network_layers": tune.randint(2, 6),
-            "network_nodes": tune.randint(250, 500),
-            "batch_size": 5000,
-            "coupling_layers": tune.randint(5, 20),
-            "conditional": True,  # tune.choice([True,False]),
-            "lr": tune.loguniform(0.001, 0.00005),
-            "batchnorm": tune.choice([True,False]),
-            "bins": tune.randint(4, 10),
-            "UMNN": False,
-            "tail_bound": tune.randint(3, 10),
-            "limit": 100000,
-            "n_dim": 90,
-            "dropout": tune.uniform(0.0,0.5),
-            "lr_schedule": False,
-            "gamma": 0.75,
-            "n_sched": 1000,
-            "canonical": False,
-            "max_steps": 40000,
-            "lambda": tune.loguniform(1, 500),
-            "n_mse_delay": 500,
-            "n_mse_turnoff": 10000,
-            "name": "hyper",
-            "calc_massloss": True,
-            "context_features":2,
-            "variable":True,
-            "parton":"q"
-        }
-        if config["variable"] and config["context_features"]<2:
-            raise
+        config["network_layers"]=tune.randint(2, 6),
+        config["network_nodes"]= tune.randint(250, 500),
+        config["coupling_layers"]= tune.randint(5, 20),
+        config["lr"]= tune.loguniform(0.001, 0.00005),
+        config["batchnorm"]= tune.choice([True,False]),
+        config["bins"]= tune.randint(4, 10),
+        config["tail_bound"]= tune.randint(3, 10),
+        config["dropout"]= tune.uniform(0.0,0.5),
+        config["lambda"]= tune.loguniform(1, 500),
+        
         data_module = JetNetDataloader(config)
         ray.init("auto") # This connects to the main ray node
         #this starts the training 
