@@ -10,7 +10,7 @@ from nflows.distributions.base import Distribution
 
 
 def mass(data,canonical=False):
-    
+    data=data[:,:90]
     if canonical:
         n_dim=data.shape[1]
         p=data.reshape(-1,n_dim//3,3)
@@ -20,15 +20,14 @@ def mass(data,canonical=False):
         
        
     else:
-        n_dim=data.shape[1]
+        n_dim=90
         p=data.reshape(-1,n_dim//3,3)
         px=torch.cos(p[:,:,1])*p[:,:,2]
         py=torch.sin(p[:,:,1])*p[:,:,2]
         pz=torch.sinh(p[:,:,0])*p[:,:,2]
-    px=torch.clamp(px.abs(),max=100)
-    py=torch.clamp(py.abs(),max=100)
-    pz=torch.clamp(pz.abs(),max=100)
-
+    px=torch.clamp(px,min=-100,max=100)
+    py=torch.clamp(py,min=-100,max=100)
+    pz=torch.clamp(pz,min=-100,max=100)
     E=torch.sqrt(px**2+py**2+pz**2)
     E=E.sum(axis=1)**2
     p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2

@@ -51,7 +51,7 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
 
 if __name__ == "__main__":
     
-    hyperopt = False  # This sets to run a hyperparameter optimization with ray or just running the training once
+    hyperopt = True  # This sets to run a hyperparameter optimization with ray or just running the training once
 
     config = {
        "network_layers": 2,  # sets amount hidden layers in transformation networks -scannable
@@ -78,10 +78,10 @@ if __name__ == "__main__":
         "context_features":1, #amount of variables used for conditioning, for 0 no conditioning is used, for 1 o nly the mass is used, for 2 also the number part is used
         "variable":1, #use variable amount of particles otherwise only use 30, options are true or false 
         "spline":True,#whether to use splines or not, can also be set to "autoregressive" but they are unstable
-        "parton":"g" #choose the dataset you want to train options: t for top,q for quark,g for gluon
+        "parton":"t" #choose the dataset you want to train options: t for top,q for quark,g for gluon
     }
     config["name"]=config["parton"]
-    root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M")
+    root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M-%S")
 
     if not hyperopt:
         train(config,hyperopt=hyperopt,root=root)
@@ -96,7 +96,7 @@ if __name__ == "__main__":
         for i in range(num_samples):
             
             temproot=root+"/train_"+str(i)
-            config["network_layers"]=np.random.randint(1, 3)
+            config["network_layers"]=np.random.randint(1, 4)
             config["network_nodes"]= np.random.randint(250, 500)
             config["coupling_layers"]= np.random.randint(5, 20)
             config["lr"]= stats.loguniform.rvs(0.00005, 0.001,size=1)[0]
@@ -106,7 +106,8 @@ if __name__ == "__main__":
             config["dropout"]= np.random.rand()*0.5
             config["lambda"]= stats.loguniform.rvs(0.01, 500,size=1)[0]
             config["spline"]= np.random.choice([True,False])
-            config["context_features"]= np.random.randint(0, 2)  
+            config["context_features"]= np.random.randint(0, 3) 
+            print(config) 
             try:
                 train(config,hyperopt=hyperopt,i=i,root=temproot)
             except:

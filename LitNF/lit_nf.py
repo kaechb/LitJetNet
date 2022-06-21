@@ -262,12 +262,15 @@ class LitNF(pl.LightningModule):
                     self.id=1
             else:
                 summary=pd.DataFrame(self.config,index=[1])
-                self.id==1
+                self.id=1
             return summary
     def _results(self):
         if self.global_step==0:
             self.df=pd.DataFrame(self.metrics,index=[self.global_step])
-        self.df.loc[self.global_step,self.config.keys()]=self.config.values()
+        else:
+            # temp=pd.DataFrame(self.metrics)
+            # temp.index[-1]=self.global_step
+            self.df=self.df.append(self.metrics,ignore_index=True)
         self.df.to_csv(self.logger.log_dir+"result.csv",index_label=["index"])
         
     def validation_step(self, batch, batch_idx):
@@ -283,25 +286,23 @@ class LitNF(pl.LightningModule):
         elif self.config["context_features"]==0:
             c=None
             n_true=batch[:,-1]
-            batch=batch[:,:-self.n_dim+1]
+            batch=batch[:,:self.n_dim+1]
         else:
             c=batch[:,-2:]
             n_true=batch[:,self.n_dim+1]
         
         #c=batch[:,-self.config["context_features"]:] if self.config["context_features"] else None #this is the condition
         c_test,n_test=self.test_cond(len(batch)) #this is the condition in the case of testing
-        assert(len(n_test)==len(c_test))
-        print(n_true)
-        print(n_test)
+
         with torch.no_grad():
-            # gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
+            gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
             test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c_test).to("cpu")
-            # gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
+            gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
             test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
 
         # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
         test=self.data_module.scaler.inverse_transform(test)
-        # gen=self.data_module.scaler.inverse_transform(gen)
+        gen=self.data_module.scaler.inverse_transform(gen)
         true=self.data_module.scaler.inverse_transform(batch[:,:self.n_dim+1])[:,:self.n_dim]
         # We overwrite in cases where n is smaller 30 the particles after n with 0
         # if self.config["context_features"]>1:
@@ -314,26 +315,28 @@ class LitNF(pl.LightningModule):
 
         #calculate mass distrbutions & concat them to training sample
         m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
-        # m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
+        m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
         m_test=mass(test[:,:self.n_dim],self.config["canonical"]).cpu()
-        # gen=torch.column_stack((gen[:,:90],m_gen))
+        gen=torch.column_stack((gen[:,:90],m_gen))
         test=torch.column_stack((test[:,:90],m_test))       
         # Again checking for overtraining
         mse=FF.mse_loss(m_t,m_test).detach()
 
         if self.config["canonical"]:
-            # gen[:,:90]=preprocess(gen[:,:90],rev=True)
+            gen[:,:90]=preprocess(gen[:,:90],rev=True)
             test[:,:90]=preprocess(test[:,:90],rev=True)
         # For one metric the pt needs to always be bigger or equal 0, so we overwrite the cases where it isnt (its not physical possible to ahve pt smaller 0)
         for i in range(30):
             i=2+3*i
-            # gen[gen[:,i]<0,i]=0
+            gen[gen[:,i]<0,i]=0
             test[test[:,i]<0,i]=0
             true[true[:,i]<0,i]=0
           #Some metrics we track
         cov,mmd=cov_mmd(test[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3),use_tqdm=False)
-        fpndv=fpnd(test[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),use_tqdm=False,jet_type=self.config["parton"])
-
+        try:
+            fpndv=fpnd(test[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),use_tqdm=False,jet_type=self.config["parton"])
+        except:
+            fpndv=1000
         self.metrics["val_fpnd"].append(fpndv)
         self.metrics["val_logprob"].append(fpndv)
         self.metrics["val_mmd"].append(mmd)
@@ -344,6 +347,7 @@ class LitNF(pl.LightningModule):
         
         
         temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0]}
+        print("step {}: ".format(self.global_step),temp)
         if self.hyperopt:
             self._results()
             summary.loc[self.id,self.config.keys()]=self.config.values()
@@ -367,8 +371,7 @@ class LitNF(pl.LightningModule):
 #             self.plot.plot_marginals(save=True)
             self.plot.plot_2d(save=True)
             self.plot.losses(save=True)
-            assert(len(m_test)==len(n_test))
-            self.plot.var_part(true=true[:,:self.n_dim],gen=test[:,:self.n_dim],true_n=n_true,gen_n=n_test,m_true=m_t,m_gen=m_test ,save=True)
+            self.plot.var_part(true=true[:,:self.n_dim],gen=test[:,:self.n_dim],true_n=n_true,gen_n=n_test,m_true=m_t,m_gen=m_gen ,save=True)
         except Exception as e:
             traceback.print_exc()
             
