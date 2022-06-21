@@ -12,6 +12,7 @@ from nflows.transforms.coupling import *
 from nflows.transforms.autoregressive import *
 from particle_net import ParticleNet
 import pytorch_lightning as pl
+from torch.optim.lr_scheduler import OneCycleLR,ReduceLROnPlateau,ExponentialLR
 import torch
 from torch import nn
 from torch.nn import functional as FF
@@ -25,14 +26,14 @@ from collections import OrderedDict
 from ray import tune
 from helpers import *
 from plotting import *
-
-
+import pandas as pd
+import os
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
-
-
+import pandas as pd
+import time
 class LitNF(pl.LightningModule):
     
    
@@ -56,17 +57,17 @@ class LitNF(pl.LightningModule):
                 use_batch_norm=self.config["batchnorm"] if "batchnorm" in self.config.keys() else 0,
 
                     )
-    def __init__(self,config):
+    def __init__(self,config,hyperopt):
         
         '''This initializes the model and its hyperparameters'''
         super().__init__()
         self.config=config
-        
+        self.hyperopt=hyperopt
         #Metrics to track during the training
-        self.metrics={"w1p":[],"w1m":[],"w1efp":[],"cov":[],"mmd":[],"fpnd":[]}
+        self.metrics={"val_w1p":[],"val_w1m":[],"val_w1efp":[],"val_cov":[],"val_mmd":[],"val_fpnd":[],"val_logprob":[]}
         #Loss function of the Normalizing flows
         self.logprobs=[]
-
+        
         self.hparams.update(config)
         self.save_hyperparameters()
         #This is the Normalizing flow model to be used later, it uses as many
@@ -165,7 +166,7 @@ class LitNF(pl.LightningModule):
         self.data_module.scaler.to(self.device)
         self.flow.to(self.device)
         if n_c>0:            
-            c= batch[:,self.n_dim:].reshape(-1,n_c).to(self.device) if c==None else c
+            c= batch[:,self.n_dim:].reshape(-.1,n_c).to(self.device) if c==None else c
             gen=self.flow.sample(1,c.reshape(-1,n_c)).reshape(-1,self.n_dim).to(self.device)
             
         else:
@@ -195,9 +196,13 @@ class LitNF(pl.LightningModule):
         self.n_dim=self.config["n_dim"]  
         opt_g = torch.optim.AdamW(self.flow.parameters(), lr=self.lr)
         self.opt_g=opt_g
-        if self.config["lr_schedule"]:
+        if self.config["lr_schedule"]=="onecycle":
             scheduler = OneCycleLR(self.opt_g,max_lr=0.01,total_steps=self.config["max_steps"])
-        return ({'optimizer': opt_g, 'frequency': 1, 'scheduler':scheduler if self.config["lr_schedule"] else None})
+        elif self.config["lr_schedule"]=="exp":
+            scheduler = ExponentialLR(self.opt_g,gamma=0.99)
+        elif self.config["lr_schedule"]=="smart":
+            scheduler = OneCycleLR(self.opt_g,"min")
+        return ({'optimizer': opt_g, 'frequency': 1, 'scheduler':None if not self.config["lr_schedule"] else scheduler})
     
     def test_cond(self,num):
         """this sampels mass and number particle conditions in an autoregressive manner needed for data generation, 
@@ -223,7 +228,7 @@ class LitNF(pl.LightningModule):
         """training loop of the model, here all the data is passed forward to a gaussian
             This is the important part what is happening here. This is all the training we do """
         x,c= batch[:,:self.n_dim],batch[:,self.n_dim:]
-        self.opt_g.zero_grad()    
+        self.opt_g.zero_grad()
         # This is the mass constraint, which constrains the flow to generate events with a mass which is the same as the mass it has been conditioned on, we can choose to not calculate this when we work without mass constraint to make training faster
         if self.config["calc_massloss"]  :
                 self.gen,self.true,self.m,self.m_g=self.sampleandscale(batch,c=c)
@@ -243,17 +248,33 @@ class LitNF(pl.LightningModule):
         return OrderedDict({"loss":g_loss})
         
     def validation_step(self, batch, batch_idx):
+        summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["parton"])
         '''This calculates some important metrics on the hold out set (checking for overtraining)'''
+
+        if os.path.isfile(summary_path):
+            time.sleep(1)
+            summary=pd.read_csv(summary_path).set_index(["index"])
+    
+        else:
+            summary=pd.DataFrame(self.config,index=[1])
+
+        if len(summary.index.values)>0 and self.global_step==0:
+            
+            self.id=summary.index.values[-1]+1
+        else:
+            self.id=1
+            
         self.data_module.scaler.to("cpu")  
         batch=batch.to("cpu")
         c=batch[:,-self.config["context_features"]:] if self.config["context_features"] else None #this is the condition
         c_test=self.test_cond(len(batch)) #this is the condition in the case of testing
-        
+
+
         with torch.no_grad():
-                gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
-                test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c_test).to("cpu")
-                gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
-                test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
+            gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
+            test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c_test).to("cpu")
+            gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
+            test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
 
         # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
         test=self.data_module.scaler.inverse_transform(test)
@@ -291,20 +312,32 @@ class LitNF(pl.LightningModule):
         cov,mmd=cov_mmd(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3),use_tqdm=False)
         fpndv=fpnd(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3).numpy(),use_tqdm=False,jet_type=self.config["parton"])
 
-        self.metrics["fpnd"].append(fpndv)
-        self.metrics["mmd"].append(mmd)
-        self.metrics["cov"].append(cov)
-        self.metrics["w1p"].append(w1p(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
-        self.metrics["w1m"].append(w1m(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
-        self.metrics["w1efp"].append(w1efp(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
+        self.metrics["val_fpnd"].append(fpndv)
+        self.metrics["val_logprob"].append(fpndv)
+        self.metrics["val_mmd"].append(mmd)
+        self.metrics["val_cov"].append(cov)
+        self.metrics["val_w1p"].append(w1p(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
+        self.metrics["val_w1m"].append(w1m(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
+        self.metrics["val_w1efp"].append(w1efp(gen[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
+        temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0]}
+        if self.global_step==0:
+            self.df=pd.DataFrame(self.metrics,index=[self.global_step])
+
+        self.df.loc[self.global_step,self.config.keys()]=self.config.values()
+        self.df.to_csv(self.logger.log_dir+"result.csv",index_label=["index"])
         
-        self.log("val_w1m",self.metrics["w1m"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_w1p",self.metrics["w1p"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_w1efp",self.metrics["w1efp"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        summary.loc[self.id,self.config.keys()]=self.config.values()
+        summary.loc[self.id,temp.keys()]=temp.values()
+        summary.to_csv(summary_path,index_label=["index"])
+
+
+        self.log("val_w1m",self.metrics["val_w1m"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_w1p",self.metrics["val_w1p"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_w1efp",self.metrics["val_w1efp"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_logprob",logprob,prog_bar=True,logger=True)
-#         self.log("val_cov",cov,prog_bar=True,logger=True,on_step=False, on_epoch=True)
-#         self.log("val_fpnd",fpndv,prog_bar=True,logger=True,on_step=False, on_epoch=True)
-#         self.log("val_mmd",mmd,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        self.log("val_cov",cov,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        self.log("val_fpnd",fpndv,prog_bar=True,logger=True,on_step=False, on_epoch=True)
+        self.log("val_mmd",mmd,prog_bar=True,logger=True,on_step=False, on_epoch=True)
         self.log("val_mse",mse,prog_bar=True,logger=True,on_step=False, on_epoch=True)
         # This part here adds the plots to tensorboard
         self.plot=plotting(model=self,gen=test[:,:self.n_dim],true=true[:,:self.n_dim],config=self.config,step=self.global_step,logger=self.logger.experiment)
