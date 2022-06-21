@@ -84,8 +84,8 @@ class JetNetDataloader(pl.LightningDataModule):
         self.data=torch.hstack((self.data,self.m))        
         self.scaler.fit(self.data)
         self.data=self.scaler.transform(self.data)
-        if self.config["context_features"]>1:
-            self.data=torch.hstack((self.data,self.n))
+
+        self.data=torch.hstack((self.data,self.n))
         
         #calculating mass dist in different bins, this is needed for the testcase where we need to generate the conditoon
         if self.config["variable"]:
@@ -93,6 +93,10 @@ class JetNetDataloader(pl.LightningDataModule):
             for i in torch.unique(self.n):
                 self.mdists[int(i)]=F(self.data[self.n[:,0]==i,-1 if self.config["context_features"]<2 else -2])    
         self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.1)
+        self.n_train=self.data[:,-1]
+        self.n_test=self.test_set[:,-1]
+        
+            
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
         assert (torch.isnan(self.data)).sum()==0

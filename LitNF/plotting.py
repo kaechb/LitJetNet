@@ -79,7 +79,7 @@ class plotting():
         data=self.test_set[:,:self.n_dim].reshape(-1,3).numpy()
         gen=self.gen[:,:self.n_dim].reshape(-1,3).numpy()
         labels=[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$"]
-        names=["eta","p3hi","pt"]
+        names=["eta","phi","pt"]
         for index in [[0,1],[0,2],[1,2]]:
             
             fig,ax=plt.subplots(ncols=2,figsize=(16, 8))
@@ -124,7 +124,7 @@ class plotting():
         #if quantile, this also creates a histogram of a subsample of the generated data, 
         # where the mass used to condition the flow is in the first 10% percentile of the simulated mass dist
         i=0
-        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m_T^{rel}$"]):
+        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m^{rel}$"]):
             
             if v!="m":
                 a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
@@ -269,4 +269,31 @@ class plotting():
         else:
                 plt.show()
 
-    #plot_var_part(self,)
+    def var_part(self,true,gen,true_n,gen_n,m_true,m_gen,form=2,save=True):
+        labels=["$\eta^{rel}$","$\phi^{rel}$","$p^{rel}_T$","$m^{rel}$"]
+        names=["eta","phi","pt","m"]
+        n,counts=torch.unique(true_n,return_counts=True)
+        for j in range(4):
+            fig,ax=plt.subplots(ncols=2,nrows=2,figsize=(15,15))
+            hep.cms.label("Private Work",data=None,lumi=None,year=None)
+            k=-1
+            for i in n[-form**2:]: 
+                ax[k%2,k//2].set_xlabel(labels[j])
+                ax[k%2,k//2].set_ylabel('Counts')
+                ax[k%2,k//2].set_title('Jets with {} Particles'.format(int(i)))
+                k+=1
+                if j!=3:
+                    _,bins,_=ax[k%form,k//form].hist(true[true_n.reshape(-1)==i,:].reshape(-1,3)[:,j].numpy(),label="MC Simulated",histtype="step")
+                    ax[k%form,k//form].hist(gen[gen_n.reshape(-1)==i,:].reshape(-1,3)[:,j].numpy(),label="Flow Generated",histtype="step",bins=bins)
+                    ax[k%2,k//2].legend()
+                else:
+                    _,bins,_=ax[k%form,k//form].hist(m_true[true_n.reshape(-1)==i].numpy(),label="MC Simulated",histtype="step")
+                    ax[k%form,k//form].hist(m_gen[gen_n.reshape(-1)==i].numpy(),label="Flow Generated",bins=bins,histtype="step")
+                    ax[k%2,k//2].legend()
+
+            plt.tight_layout(pad=2)
+            if save:
+                self.summary.add_figure("var_part_"+names[j],fig,self.step)
+    #             self.summary.close()
+            else:
+                plt.show()
