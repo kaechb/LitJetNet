@@ -273,23 +273,26 @@ class plotting():
         labels=["$\eta^{rel}$","$\phi^{rel}$","$p^{rel}_T$","$m^{rel}$"]
         names=["eta","phi","pt","m"]
         n,counts=torch.unique(true_n,return_counts=True)
+        
         for j in range(4):
             fig,ax=plt.subplots(ncols=2,nrows=2,figsize=(15,15))
             hep.cms.label("Private Work",data=None,lumi=None,year=None)
             k=-1
             for i in n[-form**2:]: 
-                ax[k%2,k//2].set_xlabel(labels[j])
-                ax[k%2,k//2].set_ylabel('Counts')
-                ax[k%2,k//2].set_title('Jets with {} Particles'.format(int(i)))
                 k+=1
+                ax[k//form,k//form].set_xlabel(labels[j])
+                ax[k//form,k%form].set_ylabel('Counts')
+                
+                ax[k//form,k%form].set_title('Jets with {} Particles'.format(int(i)))
+                
                 if j!=3:
-                    _,bins,_=ax[k%form,k//form].hist(true[true_n.reshape(-1)==i,:].reshape(-1,3)[:,j].numpy(),label="MC Simulated",histtype="step")
-                    ax[k%form,k//form].hist(gen[gen_n.reshape(-1)==i,:].reshape(-1,3)[:,j].numpy(),label="Flow Generated",histtype="step",bins=bins)
-                    ax[k%2,k//2].legend()
+                    _,bins,_=ax[k//form,k%form].hist(true[true_n.reshape(-1)==i,:].reshape(-1,3)[:,j].numpy(),label="MC Simulated",histtype="step")
+                    ax[k//form,k%form].hist(gen[gen_n.reshape(-1)==i,:].reshape(-1,3)[:,j].numpy(),label="Flow Generated",histtype="step",bins=bins)
+                    ax[k//form,k%form].legend()
                 else:
-                    _,bins,_=ax[k%form,k//form].hist(m_true[true_n.reshape(-1)==i].numpy(),label="MC Simulated",histtype="step")
-                    ax[k%form,k//form].hist(m_gen[gen_n.reshape(-1)==i].numpy(),label="Flow Generated",bins=bins,histtype="step")
-                    ax[k%2,k//2].legend()
+                    _,bins,_=ax[k//form,k%form].hist(m_true[true_n.reshape(-1)==i].numpy(),label="MC Simulated",histtype="step")
+                    ax[k//form,k%form].hist(m_gen[gen_n.reshape(-1)==i].numpy(),label="Flow Generated",bins=bins,histtype="step")
+                    ax[k//form,k%form].legend()
 
             plt.tight_layout(pad=2)
             if save:

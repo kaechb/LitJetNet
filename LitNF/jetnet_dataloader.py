@@ -80,7 +80,6 @@ class JetNetDataloader(pl.LightningDataModule):
         for i in torch.unique(self.n):
             i=int(i)
             self.data[self.data[:,-1]==i,3*i:90]=torch.normal(mean=torch.zeros_like(self.data[self.data[:,-1]==i,3*i:90]),std=1).abs()*1e-7
-
         self.data=torch.hstack((self.data,self.m))        
         self.scaler.fit(self.data)
         self.data=self.scaler.transform(self.data)
@@ -99,6 +98,7 @@ class JetNetDataloader(pl.LightningDataModule):
             
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
+        assert self.data.shape[1]==92
         assert (torch.isnan(self.data)).sum()==0
 
     def train_dataloader(self):
