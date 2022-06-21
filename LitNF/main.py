@@ -51,7 +51,7 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
 
 if __name__ == "__main__":
     
-    hyperopt = True  # This sets to run a hyperparameter optimization with ray or just running the training once
+    hyperopt = False  # This sets to run a hyperparameter optimization with ray or just running the training once
 
     config = {
        "network_layers": 2,  # sets amount hidden layers in transformation networks -scannable
@@ -81,9 +81,9 @@ if __name__ == "__main__":
         "parton":"g" #choose the dataset you want to train options: t for top,q for quark,g for gluon
     }
     config["name"]=config["parton"]
-    if not hyperopt:
-        
+    root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M")
 
+    if not hyperopt:
         train(config,hyperopt=hyperopt,root=root)
     else:
         # if not os.path.isfile("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"])):
@@ -93,7 +93,6 @@ if __name__ == "__main__":
         # This sets the logging in ray
         # reporter = CLIReporter(max_progress_rows=40, max_report_frequency=300, sort_by_metric=True,
         #                        metric="logprob", parameter_columns=["network_nodes", "network_layers", "coupling_layers", "lr"])
-        root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M")
         for i in range(num_samples):
             
             temproot=root+"/train_"+str(i)
