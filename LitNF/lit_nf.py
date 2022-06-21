@@ -62,6 +62,7 @@ class LitNF(pl.LightningModule):
         '''This initializes the model and its hyperparameters'''
         super().__init__()
         self.config=config
+        self.counter=0 #This counts how many nan grads we have, we break after 5 in a row
         self.hyperopt=hyperopt
         #Metrics to track during the training
         self.metrics={"val_w1p":[],"val_w1m":[],"val_w1efp":[],"val_cov":[],"val_mmd":[],"val_fpnd":[],"val_logprob":[]}
@@ -153,9 +154,16 @@ class LitNF(pl.LightningModule):
             if param.grad is not None:
                 valid_gradients = not (torch.isnan(param.grad).any() or torch.isinf(param.grad).any())
                 if not valid_gradients:
+                    
                     break
+        
         if not valid_gradients:
             self.zero_grad()
+            self.counter+=1
+            if self.counter>5:
+                break
+        else:
+            self.counter=0
     def sampleandscale(self,batch,c=None,n=None):
         '''This is a helper function that samples from the flow (i.e. generates a new sample) 
             and reverses the standard scaling that is done in the preprocessing. This allows to calculate the mass
@@ -311,8 +319,10 @@ class LitNF(pl.LightningModule):
         #         gen[c[:,-1]==i,3*i:]=0
         #         test[c_test[:,-1]==i,3*i:-1]=0
         #This is just a nice check to see whether we overtrain 
-        logprob = -self.flow.to("cpu").log_prob(batch[:,:self.n_dim],c_test).detach().mean().numpy()/self.n_dim
-
+        logprob = -self.flow.to("cpu").log_prob(batch[:,:self.n_dim],c ).detach().mean().numpy()/self.n_dim
+        if self.global_step > 100:
+            if logprob > 1: ###Cut off logprob value
+                raise ValueError('Logprob over 1')
         #calculate mass distrbutions & concat them to training sample
         m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
         m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
@@ -346,7 +356,7 @@ class LitNF(pl.LightningModule):
         self.metrics["val_w1efp"].append(w1efp(test[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
         
         
-        temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0]}
+        temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0],"step":[self.global_step]}
         print("step {}: ".format(self.global_step),temp)
         if self.hyperopt:
             self._results()
