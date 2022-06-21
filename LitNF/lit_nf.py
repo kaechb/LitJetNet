@@ -161,7 +161,8 @@ class LitNF(pl.LightningModule):
             self.zero_grad()
             self.counter+=1
             if self.counter>5:
-                break
+                ValueError('5 nangrads in a row')
+                
         else:
             self.counter=0
     def sampleandscale(self,batch,c=None,n=None):
