@@ -162,7 +162,7 @@ class LitNF(pl.LightningModule):
             self.counter+=1
             if self.counter>5:
                 ValueError('5 nangrads in a row')
-                
+
         else:
             self.counter=0
     def sampleandscale(self,batch,c=None,n=None):
@@ -357,7 +357,7 @@ class LitNF(pl.LightningModule):
         self.metrics["val_w1efp"].append(w1efp(test[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
         
         
-        temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0],"step":[self.global_step]}
+        temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0],"step":self.global_step}
         print("step {}: ".format(self.global_step),temp)
         if self.hyperopt:
             self._results()
