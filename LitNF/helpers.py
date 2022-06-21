@@ -18,24 +18,25 @@ def mass(data,canonical=False):
         py=p[:,:,1]
         pz=p[:,:,2]
         
-        E=torch.sqrt(px**2+py**2+pz**2)
-        E=E.sum(axis=1)**2
-        p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
-        # return torch.sqrt(E-p) 
-
-        return torch.sqrt(torch.max(E-p,torch.zeros(len(E)).to(E.device))) 
+       
     else:
         n_dim=data.shape[1]
         p=data.reshape(-1,n_dim//3,3)
         px=torch.cos(p[:,:,1])*p[:,:,2]
         py=torch.sin(p[:,:,1])*p[:,:,2]
         pz=torch.sinh(p[:,:,0])*p[:,:,2]
-        E=torch.sqrt(px**2+py**2+pz**2)
-        E=E.sum(axis=1)**2
-        p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
-        m2=E-p
-        assert m2.isnan().sum()==0  
-        return torch.sqrt(torch.max(m2,torch.zeros(len(E)).to(E.device))) 
+    px=torch.clamp(px.abs(),max=100)
+    py=torch.clamp(py.abs(),max=100)
+    pz=torch.clamp(pz.abs(),max=100)
+
+    E=torch.sqrt(px**2+py**2+pz**2)
+    E=E.sum(axis=1)**2
+    p=px.sum(axis=1)**2+py.sum(axis=1)**2+pz.sum(axis=1)**2
+    m2=E-p
+    if m2.isnan().any():
+        print("px:{} py:{} pz:{} ".format(px.abs().max(),py.abs().max(),pz.abs().max()))
+    assert m2.isnan().sum()==0  
+    return torch.sqrt(torch.max(m2,torch.zeros(len(E)).to(E.device))) 
         
 def preprocess(data,rev=False):
         n_dim=data.shape[1]
