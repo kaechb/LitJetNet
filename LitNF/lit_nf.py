@@ -225,12 +225,8 @@ class LitNF(pl.LightningModule):
             return summary
     
     def _results(self):
-        if self.global_step==0:
-            self.df=pd.DataFrame(self.metrics,index=[self.global_step])
-        else:
-            # temp=pd.DataFrame(self.metrics)
-            # temp.index[-1]=self.global_step
-            self.df=self.df.append(self.metrics,ignore_index=True)
+        
+        self.df=pd.DataFrame.from_dict(self.metrics)
         self.df.to_csv(self.logger.log_dir+"result.csv",index_label=["index"])
     
     def test_cond(self,num):
