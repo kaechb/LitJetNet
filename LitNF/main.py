@@ -33,8 +33,8 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     
     callbacks = [ModelCheckpoint(monitor="val_logprob",save_top_k=2, filename='{epoch}-{val_logprob:.2f}-{val_w1m:.4f}', dirpath=root,every_n_epochs=10) ]
     
-    if load_ckpt:
-        model = model.load_from_checkpoint(load_ckpt)
+    # if True:#load_ckpt:
+    #     model = model.load_from_checkpoint("/beegfs/desy/user/kaechben/t/2022_06_22-10_50-16/epoch=1749-val_logprob=0.94-val_w1m=0.0153.ckpt")
     model.load_datamodule(data_module)#adds datamodule to model
     model.config = config #config are our hyperparams, we make this a class property now
     logger = TensorBoardLogger(root)
@@ -42,16 +42,16 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     # Also check val every n epochs, as validation checking takes some time
     
     trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
-                          max_steps=config["max_steps"], callbacks=callbacks, progress_bar_refresh_rate=int(not hyperopt)*10,
+                          max_steps=-1 if not hyperopt else config["max_steps"], callbacks=callbacks, progress_bar_refresh_rate=int(not hyperopt)*10,
                           check_val_every_n_epoch=10,track_grad_norm=2 ,num_sanity_val_steps=1,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
-                         fast_dev_run=False,default_root_dir=root)
+                         fast_dev_run=False,default_root_dir=root,max_epochs=-1)
     # This calls the fit function which trains the model
     trainer.fit(model, train_dataloaders=data_module )  
 
 
 if __name__ == "__main__":
     
-    hyperopt = True  # This sets to run a hyperparameter optimization with ray or just running the training once
+    hyperopt = False  # This sets to run a hyperparameter optimization with ray or just running the training once
 
     config = {
        "network_layers": 2,  # sets amount hidden layers in transformation networks -scannable
@@ -72,13 +72,14 @@ if __name__ == "__main__":
         "lambda": 10,  # balance between massloss and nll -scannable
         "n_mse_turnoff": 1000,  # when to turn off mass loss -scannable
         "n_mse_delay": 5,  # when to turn on mass loss -scannable
-        "name": "firsthyperopt",  # name for logging folder
+        "name": "q",  # name for logging folder
         "disc": False,  # whether to train gan style discriminator that decides whether point is simulated or generated-semi-scannable
         "calc_massloss": True, # whether to calculate mass loss, makes training slower, do not use with autoregressive! 
-        "context_features":1, #amount of variables used for conditioning, for 0 no conditioning is used, for 1 o nly the mass is used, for 2 also the number part is used
+        "context_features":2, #amount of variables used for conditioning, for 0 no conditioning is used, for 1 o nly the mass is used, for 2 also the number part is used
         "variable":1, #use variable amount of particles otherwise only use 30, options are true or false 
         "spline":True,#whether to use splines or not, can also be set to "autoregressive" but they are unstable
-        "parton":"t" #choose the dataset you want to train options: t for top,q for quark,g for gluon
+        "parton":"t", #choose the dataset you want to train options: t for top,q for quark,g for gluon
+        "oversampling":False
     }
     config["name"]=config["parton"]
     root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M-%S")
@@ -101,12 +102,14 @@ if __name__ == "__main__":
             config["coupling_layers"]= np.random.randint(5, 20)
             config["lr"]= stats.loguniform.rvs(0.00005, 0.001,size=1)[0]
             config["batchnorm"]= np.random.choice([True,False])
+            config["n_mse_turnoff"]= np.random.choice([0,1500,3000])
+            
             config["bins"]= np.random.randint(4, 10)
             config["tail_bound"]= np.random.randint(3, 10)
             config["dropout"]= np.random.rand()*0.5
             config["lambda"]= stats.loguniform.rvs(0.01, 500,size=1)[0]
-            config["spline"]= np.random.choice([True,False])
-            config["context_features"]= np.random.randint(0, 3) 
+            #config["spline"]= np.random.choice([True,False])
+            #config["context_features"]= np.random.randint(0, 3) 
             print(config) 
             try:
                 train(config,hyperopt=hyperopt,i=i,root=temproot)

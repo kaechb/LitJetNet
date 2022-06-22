@@ -239,18 +239,15 @@ class plotting():
             c=1
         df_g=pd.DataFrame(self.gen[:,:self.n_dim].detach().numpy()[:,range(i,90,3)])
         df_h=pd.DataFrame(self.test_set[:,:self.n_dim].detach().numpy()[:,range(i,90,3)])
-        
         fig,ax=plt.subplots(ncols=2,figsize=(20,10))
         corr_g = ax[0].matshow(df_g.corr())
         corr_g.set_clim(-c,c)
         divider = make_axes_locatable(ax[0])
         cax = divider.append_axes('right', size='5%', pad=0.05)
         cbar=fig.colorbar(corr_g,cax=cax)
-
         corr_h = ax[1].matshow(df_h.corr())
         corr_h.set_clim(-c,c)
         divider = make_axes_locatable(ax[1])
-
         cax2 = divider.append_axes('right', size='5%', pad=0.05)
         cbar=fig.colorbar(corr_h,cax=cax2)
         plt.suptitle("{} Correlation between Particles".format(names[i]))
@@ -263,8 +260,7 @@ class plotting():
         
         if save:
                 title=["corr_eta","corr_phi","corr_pt"]
-                self.summary.add_figure(title[i],fig,self.step)
-                
+                self.summary.add_figure(title[i],fig,self.step)    
     #             self.summary.close()
         else:
                 plt.show()
@@ -273,7 +269,6 @@ class plotting():
         labels=["$\eta^{rel}$","$\phi^{rel}$","$p^{rel}_T$","$m^{rel}$"]
         names=["eta","phi","pt","m"]
         n,counts=torch.unique(true_n,return_counts=True)
-        
         for j in range(4):
             fig,ax=plt.subplots(ncols=2,nrows=2,figsize=(15,15))
             hep.cms.label("Private Work",data=None,lumi=None,year=None)
