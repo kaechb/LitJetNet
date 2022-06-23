@@ -316,17 +316,13 @@ class LitNF(pl.LightningModule):
             n_true=batch[:,self.n_dim+1]
         #c=batch[:,-self.config["context_features"]:] if self.config["context_features"] else None #this is the condition
         c_test,n_test=self.test_cond(len(batch)) #this is the condition in the case of testing
-        plt.hist(c.flatten().detach().numpy())
-        plt.hist(c_test.flatten().detach().numpy())
 
-        plt.savefig("mass")
-        plt.close
         with torch.no_grad():
             # gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
             test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c_test).to("cpu").reshape(-1,90)
-            if self.config["oversampling"]:
-                order=torch.sort(test.reshape(-1,30,3)[:,:,2],dim=1,descending=True)[1]
-                test=torch.gather(input=test.reshape(-1,30,3),index=order.unsqueeze(-1).repeat(1,1,3),dim=1).reshape(-1,90)
+            # if self.config["oversampling"]:
+            #     order=torch.sort(test.reshape(-1,30,3)[:,:,2],dim=1,descending=True)[1]
+            #     test=torch.gather(input=test.reshape(-1,30,3),index=order.unsqueeze(-1).repeat(1,1,3),dim=1).reshape(-1,90)
             #test=test.reshape(-1,30,3)[order.repeat(1,1,3)].reshape(-1,90)
             # gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
             test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
