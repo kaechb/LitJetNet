@@ -316,7 +316,11 @@ class LitNF(pl.LightningModule):
             n_true=batch[:,self.n_dim+1]
         #c=batch[:,-self.config["context_features"]:] if self.config["context_features"] else None #this is the condition
         c_test,n_test=self.test_cond(len(batch)) #this is the condition in the case of testing
-
+        plt.hist(c_test.detach().numpy(),alpha=0.5,label="test")
+        plt.hist(c.detach().numpy(),alpha=0.5,label="true")
+        plt.legend()
+        plt.savefig("conditions")
+        plt.close()
         with torch.no_grad():
             # gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
             test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c_test).to("cpu").reshape(-1,90)
@@ -345,6 +349,11 @@ class LitNF(pl.LightningModule):
         m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
         # m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
         m_test=mass(test[:,:self.n_dim],self.config["canonical"]).cpu()
+        plt.hist(m_test.detach().numpy(),alpha=0.5,label="test")
+        plt.hist(m_t.detach().numpy(),alpha=0.5,label="true")
+        plt.legend()
+        plt.savefig("masses")
+        plt.close()
         # gen=torch.column_stack((gen[:,:90],m_gen))
         test=torch.column_stack((test[:,:90],m_test))       
         # Again checking for overtraining
