@@ -66,7 +66,7 @@ class LitNF(pl.LightningModule):
         self.counter=0 #This counts how many nan grads we have, we break after 5 in a row
         self.hyperopt=hyperopt
         #Metrics to track during the training
-        self.metrics={"val_w1p":[],"val_w1m":[],"val_w1efp":[],"val_cov":[],"val_mmd":[],"val_fpnd":[],"val_logprob":[]}
+        self.metrics={"val_w1p":[],"val_w1m":[],"val_w1efp":[],"val_cov":[],"val_mmd":[],"val_fpnd":[],"val_logprob":[],"step":[]}
         #Loss function of the Normalizing flows
         self.logprobs=[]
         
@@ -150,13 +150,14 @@ class LitNF(pl.LightningModule):
         
     def on_after_backward(self) -> None:
         '''This is a genious little hook, sometimes my model dies, i have no clue why. This saves the training from crashing and continues'''
-        valid_gradients = True
+        valid_gradients = False
         for name, param in self.named_parameters():
             if param.grad is not None:
                 valid_gradients = not (torch.isnan(param.grad).any() or torch.isinf(param.grad).any())
                 if not valid_gradients:
                     break
         if not valid_gradients:
+            print("not valid grads",self.counter)
             self.zero_grad()
             self.counter+=1
             if self.counter>5:
@@ -209,23 +210,33 @@ class LitNF(pl.LightningModule):
             scheduler = OneCycleLR(self.opt_g,"min")
         return ({'optimizer': opt_g, 'frequency': 1, 'scheduler':None if not self.config["lr_schedule"] else scheduler})
      
-    def _summary(self):
+    def _summary(self,temp):
         if self.hyperopt:
-            self.summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["parton"])
+            self.summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["name"])
+            
             if os.path.isfile(self.summary_path):
                 time.sleep(1)
                 summary=pd.read_csv(self.summary_path).set_index(["index"])
-                if len(summary.index.values)>0 and self.global_step==0:         
-                    self.id=summary.index.values[-1]+1
-                elif self.global_step==0:
-                    self.id=1
+                try:
+                    if self.global_step==0:
+                        self.id=int(summary.index.values[-1])+1
+                except:
+                    print("wrong index",self.index.values[-1])
+                summary.loc[self.id,self.config.keys()]=self.config.values()
+                summary.loc[self.id,temp.keys()]=temp.values()
+                summary.to_csv(self.summary_path,index_label=["index"])
+                
+                    
+            
             else:
-                summary=pd.DataFrame(self.config,index=[1])
                 self.id=1
+                summary=pd.DataFrame(temp,index=[1])
+                summary.loc[self.id,self.config.keys()]=self.config.values()
+                
             return summary
     
     def _results(self):
-        
+        self.metrics["step"].append(self.global_step)
         self.df=pd.DataFrame.from_dict(self.metrics)
         self.df.to_csv(self.logger.log_dir+"result.csv",index_label=["index"])
     
@@ -288,7 +299,6 @@ class LitNF(pl.LightningModule):
         
     def validation_step(self, batch, batch_idx):
         '''This calculates some important metrics on the hold out set (checking for overtraining)'''
-        summary=self._summary()
         self.data_module.scaler.to("cpu")  
         batch=batch.to("cpu")
         if self.config["context_features"]==1:
@@ -362,13 +372,10 @@ class LitNF(pl.LightningModule):
         
         temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0],"step":self.global_step}
         self.config["path"]=self.logger.log_dir
-        print(self.config["path"])
         print("step {}: ".format(self.global_step),temp)
         if self.hyperopt:
             self._results()
-            summary.loc[self.id,self.config.keys()]=self.config.values()
-            summary.loc[self.id,temp.keys()]=temp.values()
-            summary.to_csv(self.summary_path,index_label=["index"])
+            summary=self._summary(temp)
 
         self.log("val_w1m",self.metrics["val_w1m"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1p",self.metrics["val_w1p"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
