@@ -94,7 +94,7 @@ class JetNetDataloader(pl.LightningDataModule):
         if self.config["variable"]:
             self.mdists={}
             for i in torch.unique(self.n):
-                self.mdists[int(i)]=F(self.data[self.n[:,0]==i,-1 if self.config["context_features"]<2 else -2])    
+                self.mdists[int(i)]=F(self.data[self.n[:,0]==i,-2])    
         self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.1)
         self.n_train=self.data[:,-1]
         self.n_test=self.test_set[:,-1]

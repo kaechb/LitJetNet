@@ -82,7 +82,7 @@ if __name__ == "__main__":
         "oversampling":False
     }
     config["name"]=config["parton"]
-    
+    config["name"]=config["name"]+"debug"
     root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M-%S")
 
     if not hyperopt:
