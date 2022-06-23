@@ -129,6 +129,7 @@ class plotting():
             if v!="m":
                 a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
                 b=max(np.quantile(self.gen[:,i],0.999),np.quantile(self.test_set[:,i],0.999))     
+                
                 h=hist.Hist(hist.axis.Regular(bins,a,b))
                 h2=hist.Hist(hist.axis.Regular(bins,a,b))
                 h.fill(self.gen[:,i])
@@ -137,6 +138,8 @@ class plotting():
             else:
                 a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
                 b=max(np.quantile(m_t,0.999),np.quantile(m,0.999))
+                a=np.quantile(m_t,0.001)
+                b=np.quantile(m_t,0.999)
                 h=hist.Hist(hist.axis.Regular(bins,a,b))
                 h2=hist.Hist(hist.axis.Regular(bins,a,b))
                 bins = h.axes[0].edges
