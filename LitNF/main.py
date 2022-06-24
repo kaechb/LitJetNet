@@ -41,7 +41,7 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     #log every n steps could be important as it decides how often it should log to tensorboard
     # Also check val every n epochs, as validation checking takes some time
     
-    trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
+    trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=001,  # auto_scale_batch_size="binsearch",
                           max_steps=100000 if config["oversampling"]  else config["max_steps"], callbacks=callbacks, progress_bar_refresh_rate=int(not hyperopt)*10,
                           check_val_every_n_epoch=10,track_grad_norm=2 ,num_sanity_val_steps=1,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
                          fast_dev_run=False,default_root_dir=root,max_epochs=-1)
@@ -62,13 +62,13 @@ if __name__ == "__main__":
         "batchnorm": False,  # use batchnorm or not -scannable
         "bins": 8,  # amount of bins to use in rational quadratic splines -scannable
         "tail_bound": 6,  # splines:max value that is transformed, over this value theree is id  -scannable
-        "limit": 100000,  # how many data points to use, test_set is 10% of this -scannable in a sense use 10 k for faster training
+        "limit": -1,  # how many data points to use, test_set is 10% of this -scannable in a sense use 10 k for faster training
         "n_dim": 90,  # how many dimensions to use or equivalently /3 gives the amount of particles to use NEVER EVER CHANGE THIS
         "dropout": 0.4,  # use droput proportion, for 0 there is no dropout -scannable
         "lr_schedule": False,  # whether tos chedule the learning rate can be False or "smart","exp","onecycle" -semi-scannable
         "n_sched": 1000,  # how many steps between an annealing step -semi-scannable
         "canonical": False,  # transform data coordinates to px,py,pz -scannable
-        "max_steps": 3000,  # how many steps to use at max - lower for quicker training
+        "max_steps": 5,  # how many steps to use at max - lower for quicker training
         "lambda": 10,  # balance between massloss and nll -scannable
         "n_mse_turnoff": 10000000,  # when to turn off mass loss -scannable
         "n_mse_delay": 5,  # when to turn on mass loss -scannable
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         "oversampling":False
     }
     config["name"]=config["parton"]
-    config["name"]=config["name"]+"debug"
+    config["name"]=config["name"]+"working"
     root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M-%S")
 
     if not hyperopt:
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         # reporter = CLIReporter(max_progress_rows=40, max_report_frequency=300, sort_by_metric=True,
         #                        metric="logprob", parameter_columns=["network_nodes", "network_layers", "coupling_layers", "lr"])
         for i in range(num_samples):
-            print(config)
+            
             temproot=root+"/train_"+str(i)
             config["network_layers"]=np.random.randint(1, 4)
             config["network_nodes"]= np.random.randint(250, 500)
@@ -111,12 +111,13 @@ if __name__ == "__main__":
             config["dropout"]= np.random.rand()*0.5
             config["lambda"]= stats.loguniform.rvs(0.01, 200,size=1)[0]
             config["spline"]= np.random.choice([True,False])
-            config["context_features"]=1# np.random.randint(0, 3) 
+            config["context_features"]= np.random.randint(0, 3) 
             print(config)
            
             try:
                 train(config,hyperopt=hyperopt,i=i,root=temproot)
             except:
+                print("error")
                 traceback.print_exc()
         # reporter.add_metric_column("m_loss")
         # reporter.add_metric_column("logprob")
