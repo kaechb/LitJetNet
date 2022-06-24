@@ -161,7 +161,7 @@ class LitNF(pl.LightningModule):
             self.zero_grad()
             self.counter+=1
             if self.counter>5:
-                ValueError('5 nangrads in a row')
+                raise ValueError('5 nangrads in a row')
         else:
             self.counter=0
     def sampleandscale(self,batch,c=None,n=None):
@@ -211,28 +211,19 @@ class LitNF(pl.LightningModule):
         return ({'optimizer': opt_g, 'frequency': 1, 'scheduler':None if not self.config["lr_schedule"] else scheduler})
      
     def _summary(self,temp):
-        if self.hyperopt:
+
             self.summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["name"])
             
             if os.path.isfile(self.summary_path):
-                time.sleep(1)
-                summary=pd.read_csv(self.summary_path).set_index(["index"])
-                try:
-                    if self.global_step==0:
-                        self.id=int(summary.index.values[-1])+1
-                except:
-                    print("wrong index",self.index.values[-1])
-                summary.loc[self.id,self.config.keys()]=self.config.values()
-                summary.loc[self.id,temp.keys()]=temp.values()
-                summary.to_csv(self.summary_path,index_label=["index"])
                 
-                    
-            
+                summary=pd.read_csv(self.summary_path).set_index(["path_index"])
             else:
-                self.id=1
-                summary=pd.DataFrame(temp,index=[1])
-                summary.loc[self.id,self.config.keys()]=self.config.values()
-                
+                print("summary not found")
+                summary=pd.DataFrame()
+
+            summary.loc[self.config["path"],self.config.keys()]=self.config.values()
+            summary.loc[self.config["path"],temp.keys()]=temp.values()
+            summary.to_csv(self.summary_path,index_label=["path_index"])  
             return summary
     
     def _results(self):
@@ -316,11 +307,7 @@ class LitNF(pl.LightningModule):
             n_true=batch[:,self.n_dim+1]
         #c=batch[:,-self.config["context_features"]:] if self.config["context_features"] else None #this is the condition
         c_test,n_test=self.test_cond(len(batch)) #this is the condition in the case of testing
-        plt.hist(c_test.detach().numpy(),alpha=0.5,label="test")
-        plt.hist(c.detach().numpy(),alpha=0.5,label="true")
-        plt.legend()
-        plt.savefig("conditions")
-        plt.close()
+       
         with torch.no_grad():
             # gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
             test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c_test).to("cpu").reshape(-1,90)
@@ -349,11 +336,7 @@ class LitNF(pl.LightningModule):
         m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
         # m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
         m_test=mass(test[:,:self.n_dim],self.config["canonical"]).cpu()
-        plt.hist(m_test.detach().numpy(),alpha=0.5,label="test")
-        plt.hist(m_t.detach().numpy(),alpha=0.5,label="true")
-        plt.legend()
-        plt.savefig("masses")
-        plt.close()
+ 
         # gen=torch.column_stack((gen[:,:90],m_gen))
         test=torch.column_stack((test[:,:90],m_test))       
         # Again checking for overtraining
@@ -374,7 +357,7 @@ class LitNF(pl.LightningModule):
         except:
             fpndv=1000
         self.metrics["val_fpnd"].append(fpndv)
-        self.metrics["val_logprob"].append(fpndv)
+        self.metrics["val_logprob"].append(logprob)
         self.metrics["val_mmd"].append(mmd)
         self.metrics["val_cov"].append(cov)
         self.metrics["val_w1p"].append(w1p(test[:,:self.n_dim].reshape(-1,self.n_dim//3,3),true[:,:self.n_dim].reshape(-1,self.n_dim//3,3)))
