@@ -380,3 +380,55 @@ class plotting():
     #             self.summary.close()
         else:
                 plt.show()
+    def var_part(self,true,gen,true_n,gen_n,m_true,m_gen,form=2,save=True):
+    labels=["$\eta^{rel}$","$\phi^{rel}$","$p^{rel}_T$","$m^{rel}$"]
+    names=["eta","phi","pt","m"]
+    n,counts=torch.unique(true_n,return_counts=True)
+    for j in range(4):
+        fig,ax=plt.subplots(ncols=2,nrows=2,figsize=(15,15))
+
+        k=-1
+        ntemp=n[-form**2:]
+
+        
+        for i in list(ntemp)[::-1]: 
+            k+=1
+            i=int(i)
+
+            if names[j]!="m":
+                a=np.quantile(self.test_set[true_n.reshape(-1)==i,:].reshape(-1,3)[:,j],0.001)
+                b=np.quantile(self.test_set[true_n.reshape(-1)==i,:].reshape(-1,3)[:,j],0.999)    
+                h=hist.Hist(hist.axis.Regular(15,a,b))
+                h2=hist.Hist(hist.axis.Regular(15,a,b))
+                bins = h.axes[0].edges
+
+                ax[k//form,k%form].legend()
+                h.fill(self.gen[gen_n.reshape(-1)==i,:].reshape(-1,3)[:,j])
+                h2.fill(self.test_set[true_n.reshape(-1)==i,:].reshape(-1,3)[:,j])
+                
+            else:
+                a=np.quantile(m_true[true_n.reshape(-1)==i],0.001)
+                b=np.quantile(m_gen[gen_n.reshape(-1)==i],0.999)
+
+                h=hist.Hist(hist.axis.Regular(15,a,b))
+                h2=hist.Hist(hist.axis.Regular(15,a,b))
+                bins = h.axes[0].edges
+                h.fill(m_gen[gen_n.reshape(-1)==i])
+                h2.fill(m_true[true_n.reshape(-1)==i])
+                
+
+            h.plot1d(    ax=ax[k//2,k%2])  # line or bar)
+            h2.plot1d(    ax=ax[k//2,k%2])  # line or bar)
+            ax[k//2,k%2].set_title("{} Distribution for jets with {} particles".format(labels[j],i))
+
+            ax[k//2,k%2].set_xlabel(labels[j])
+
+            ax[k//2,k%2].set_xlim(a,b)
+
+            #plt.tight_layout(pad=2)
+
+        if save:
+            self.summary.add_figure("jet{}_{}".format(i//3+1,name[i%3]),fig,global_step=self.step)
+            self.summary.close()
+        else:
+            plt.show()
