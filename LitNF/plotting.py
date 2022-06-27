@@ -380,28 +380,3 @@ class plotting():
     #             self.summary.close()
         else:
                 plt.show()
-batch=model.data_module.test_set.to("cpu")
-model2=model
-model.q0.temp=1
-model2.flow = base.Flow(distribution=model.q0, transform=model.flows)
-true=model.data_module.scaler.inverse_transform(batch[:,:-1].cpu())
-with torch.no_grad():
-    if model.config["context_features"]:
-        gen=model.flow_test.to("cpu").sample(1,batch[:,model.n_dim:].reshape(-1,model.config["context_features"]).to("cpu"))  
-        gen=torch.hstack((gen[:,:model.n_dim].cpu().detach().reshape(-1,model.n_dim),torch.ones(len(gen)).unsqueeze(1)))
-    else:
-            gen=model.flow.to("cpu").sample(len(true)).to("cpu")
-            
-gen=model.data_module.scaler.inverse_transform(gen)
-if model.config["context_features"]>1:
-    for i in torch.unique(batch[:,-1]):
-        i=int(i)
-        gen[batch[:,-1]==i,3*i:]=0
-
-logprob = -model.flow.to("cpu").log_prob(batch[:,:model.n_dim],batch[:,model.n_dim:]).detach().mean().numpy()/model.n_dim
-
-
-m_t=mass(true[:,:model.n_dim].to(model.device))
-m_gen=mass(gen[:,:model.n_dim],model.config["canonical"])
-gen=torch.column_stack((gen[:,:90],m_gen))
-
