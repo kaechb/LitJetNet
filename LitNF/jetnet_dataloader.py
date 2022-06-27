@@ -87,7 +87,7 @@ class JetNetDataloader(pl.LightningDataModule):
         self.data=torch.hstack((self.data,self.m))        
         self.scaler.fit(self.data)
         self.data=self.scaler.transform(self.data)
-
+        self.min_m=self.scaler.transform(torch.zeros((1,91)))[0,-1]
         self.data=torch.hstack((self.data,self.n))
         
         #calculating mass dist in different bins, this is needed for the testcase where we need to generate the conditoon
@@ -95,7 +95,7 @@ class JetNetDataloader(pl.LightningDataModule):
             self.mdists={}
             for i in torch.unique(self.n):
                 self.mdists[int(i)]=F(self.data[self.n[:,0]==i,-2])    
-        self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.1)
+        self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.3)
         self.n_train=self.data[:,-1]
         self.n_test=self.test_set[:,-1]
         
