@@ -428,7 +428,7 @@ class plotting():
                 #plt.tight_layout(pad=2)
 
             if save:
-                self.summary.add_figure("jet{}_{}".format(i//3+1,name[i%3]),fig,global_step=self.step)
+                self.summary.add_figure("jet{}_{}_part".format(names[j],i),fig,global_step=self.step)
                 self.summary.close()
             else:
                 plt.show()
