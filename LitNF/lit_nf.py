@@ -214,7 +214,7 @@ class LitNF(pl.LightningModule):
 
             self.summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["name"])
             if self.global_step==0:
-                start=time.time()
+                self.start=time.time()
             if os.path.isfile(self.summary_path):
                 
                 summary=pd.read_csv(self.summary_path).set_index(["path_index"])
@@ -224,7 +224,7 @@ class LitNF(pl.LightningModule):
 
             summary.loc[self.config["path"],self.config.keys()]=self.config.values()
             summary.loc[self.config["path"],temp.keys()]=temp.values()
-            summary.loc[self.config["path"],"time"]=start-time.time()
+            summary.loc[self.config["path"],"time"]=self.start-time.time()
             summary.to_csv(self.summary_path,index_label=["path_index"])  
             return summary
     
@@ -303,6 +303,7 @@ class LitNF(pl.LightningModule):
         elif self.config["context_features"]==0:
             c=None
             c_test=None
+            c_test,n_test=self.test_cond(len(batch))
             n_true=batch[:,-1]
             batch=batch[:,:self.n_dim+1]
         else:
