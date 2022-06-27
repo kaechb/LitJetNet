@@ -221,10 +221,13 @@ class LitNF(pl.LightningModule):
             else:
                 print("summary not found")
                 summary=pd.DataFrame()
-
-            summary.loc[self.config["path"],self.config.keys()]=self.config.values()
-            summary.loc[self.config["path"],temp.keys()]=temp.values()
-            summary.loc[self.config["path"],"time"]=self.start-time.time()
+                first=True
+                
+            summary.loc[self.config["path_index"],self.config.keys()]=self.config.values()
+            summary.loc[self.config["path_index"],temp.keys()]=temp.values()
+            summary.loc[self.config["path_index"],"time"]=self.start-time.time()
+            if first:
+                summary=summary.set_index(["path_index"])
             summary.to_csv(self.summary_path,index_label=["path_index"])  
             return summary
     
@@ -373,7 +376,7 @@ class LitNF(pl.LightningModule):
         
         
         temp={"val_logprob":logprob,"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1][0],"val_w1efp":self.metrics["val_w1efp"][-1][0],"val_w1p":self.metrics["val_w1p"][-1][0],"step":self.global_step}
-        self.config["path"]=self.logger.log_dir
+        self.config["path_index"]=self.logger.log_dir
         print("step {}: ".format(self.global_step),temp)
         if self.hyperopt:
             self._results()
