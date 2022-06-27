@@ -211,7 +211,7 @@ class LitNF(pl.LightningModule):
         return ({'optimizer': opt_g, 'frequency': 1, 'scheduler':None if not self.config["lr_schedule"] else scheduler})
      
     def _summary(self,temp):
-
+            first=False
             self.summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["name"])
             if self.global_step==0:
                 self.start=time.time()
