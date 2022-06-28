@@ -225,7 +225,7 @@ class LitNF(pl.LightningModule):
                 
             summary.loc[self.logger.log_dir,self.config.keys()]=self.config.values()
             summary.loc[self.logger.log_dir,temp.keys()]=temp.values()
-            summary.loc[self.logger.log_dir,"time"]=self.start-time.time()                
+            summary.loc[self.logger.log_dir,"time"]=time.time()-self.start          
             summary.to_csv(self.summary_path,index_label=["path_index"])  
             return summary
     
