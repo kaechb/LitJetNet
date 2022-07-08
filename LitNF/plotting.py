@@ -168,7 +168,7 @@ class plotting():
                 if v!="m":
                     ax[0].legend(["Flow Generated","MC Simulatied"])
                 elif plot_vline:
-                    ax[0].legend(["Flow Generated","MC Simulated","10% quantile Flow Generated","10% quantile MC Simulation"] )
+                    ax[0].legend(["Flow Generated","MC Simulated"] )
             except:
                 print("mass plot failed reverting to simple plot mass bins")
                 plt.close()

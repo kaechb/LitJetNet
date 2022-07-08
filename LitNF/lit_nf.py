@@ -97,7 +97,7 @@ class LitNF(pl.LightningModule):
                     num_bins=self.config["bins"],
                     use_residual_blocks=False,
                     use_batch_norm=self.config["batchnorm"],
-                    activation=self.config["activation"])]
+                    activation=FF.relu)]
             
             elif self.config["spline"]:
                     
@@ -260,12 +260,6 @@ class LitNF(pl.LightningModule):
         """training loop of the model, here all the data is passed forward to a gaussian
             This is the important part what is happening here. This is all the training we do """
         x,c= batch[:,:self.n_dim],batch[:,self.n_dim:]
-        
-        if self.config["oversampling"]:
-            shuffle=[torch.randperm(30).to("cuda") for i in range(len(batch))]
-            form=torch.Tensor((len(batch),30,3)).to("cuda").int()
-            shuffle=torch.cat(shuffle,out=form).to("cuda").int()
-            x=torch.gather(input=x.reshape(-1,30,3),index=shuffle.unsqueeze(-1).repeat(1,1,3).type(torch.int64),dim=1).reshape(-1,90)
 
         if self.config["context_features"]==1:
             c=c[:,0].reshape(-1,1)
@@ -303,7 +297,6 @@ class LitNF(pl.LightningModule):
             
         elif self.config["context_features"]==0:
             c=None
-            c_test=None
             c_test,n_test=self.test_cond(len(batch))
             n_true=batch[:,-1]
             batch=batch[:,:self.n_dim+1]
@@ -316,39 +309,38 @@ class LitNF(pl.LightningModule):
             c_test=c_test.reshape(-1,self.config["context_features"])
             c_test[:,0]=torch.clamp(c_test[:,0],min=self.data_module.min_m)
         with torch.no_grad():
-            # gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
-
+            
+            gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
             test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1, c_test).to("cpu").reshape(-1,90)
             # if self.config["oversampling"]:
             #     order=torch.sort(test.reshape(-1,30,3)[:,:,2],dim=1,descending=True)[1]
             #     test=torch.gather(input=test.reshape(-1,30,3),index=order.unsqueeze(-1).repeat(1,1,3),dim=1).reshape(-1,90)
             #test=test.reshape(-1,30,3)[order.repeat(1,1,3)].reshape(-1,90)
-            # gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
+            gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
             test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
         # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
         test=self.data_module.scaler.inverse_transform(test)
-        # gen=self.data_module.scaler.inverse_transform(gen)
+        gen=self.data_module.scaler.inverse_transform(gen)
         true=self.data_module.scaler.inverse_transform(batch[:,:self.n_dim+1])[:,:self.n_dim]
         # We overwrite in cases where n is smaller 30 the particles after n with 0
-        # if self.config["context_features"]>1:
-        #     for i in torch.unique(batch[:,-1]):
-        #         i=int(i)
-        #         gen[c[:,-1]==i,3*i:]=0
-        #         test[c_test[:,-1]==i,3*i:-1]=0
+        if self.config["context_features"]>1:
+            for i in torch.unique(batch[:,-1]):
+                i=int(i)
+                gen[c[:,-1]==i,3*i:-1]=0
+                test[c_test[:,-1]==i,3*i:-1]=0
         #This is just a nice check to see whether we overtrain 
-        logprob = -self.flow.to("cpu").log_prob(batch[:,:self.n_dim],c ).detach().mean().numpy()/self.n_dim
+        logprob = -self.flow.to("cpu").log_prob(batch[:,:self.n_dim],c     ).detach().mean().numpy()/self.n_dim
         # if self.global_step > 100:
         #     if logprob > 1: ###Cut off logprob value
         #         raise ValueError('Logprob over 1')
         #calculate mass distrbutions & concat them to training sample
         m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
-        # m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
+        m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
         m_test=mass(test[:,:self.n_dim],self.config["canonical"]).cpu()
- 
         # gen=torch.column_stack((gen[:,:90],m_gen))
         test=torch.column_stack((test[:,:90],m_test))       
         # Again checking for overtraining
-        mse=FF.mse_loss(m_t,m_test).detach()
+        mse=FF.mse_loss(m_t,m_gen).detach()
         if self.config["canonical"]:
             # gen[:,:90]=preprocess(gen[:,:90],rev=True)
             test[:,:90]=preprocess(test[:,:90],rev=True)
