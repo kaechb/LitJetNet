@@ -45,7 +45,7 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     
     trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
                           max_epochs=1500*config["freq"], callbacks=callbacks, progress_bar_refresh_rate=int(not hyperopt)*10,
-                          check_val_every_n_epoch=100,track_grad_norm=0 ,num_sanity_val_steps=1,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
+                          check_val_every_n_epoch=100 ,num_sanity_val_steps=0,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
                          fast_dev_run=False,default_root_dir=root)
     # This calls the fit function which trains the model
     trainer.fit(model, train_dataloaders=data_module )  
@@ -126,7 +126,7 @@ if __name__ == "__main__":
             config["l_dim"]=config["heads"]*np.random.randint(3,30)
             config["hidden"]=2*np.random.randint(6, 9)
             config["num_layers"]=np.random.randint(2, 6)
-            config["corr"]= np.random.choice([True,False],[0.7,0.3])
+            config["corr"]= np.random.choice([True,False],p=[0.7,0.3])
             config["opt"]=np.random.choice(["Adam","AdamW","RMSprop"])
             print(config)
            

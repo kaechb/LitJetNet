@@ -342,7 +342,8 @@ class TransGan(pl.LightningModule):
         gradient_penalty=0
 
         ### NF PART
-        sched_nf.step()
+        if self.config["sched"]:
+            sched_nf.step()
         if self.global_step<8000:
             nf_loss -=self.flow.to(self.device).log_prob(batch).mean()#c if self.config["context_features"] else None
             nf_loss/=(self.n_dim*self.n_part) 
@@ -461,7 +462,7 @@ class TransGan(pl.LightningModule):
         self.metrics["val_mmd"].append(mmd)
         self.metrics["val_cov"].append(cov)
         self.metrics["val_w1p"].append(w1p(fake_scaled.reshape(len(batch),self.n_part,self.n_dim),true_scaled.reshape(len(batch),self.n_part,self.n_dim)))
-        self.metrics["val_w1m"].append(w1m(fake_scaled.reshape(len(batch),self.n_part,self.n_dim),metrics.reshape(len(batch),self.n_part,self.n_dim)))
+        self.metrics["val_w1m"].append(w1m(fake_scaled.reshape(len(batch),self.n_part,self.n_dim),true_scaled.reshape(len(batch),self.n_part,self.n_dim)))
         self.metrics["val_w1efp"].append(w1efp(fake_scaled.reshape(len(batch),self.n_part,self.n_dim),true_scaled.reshape(len(batch),self.n_part,self.n_dim)))
         
         
