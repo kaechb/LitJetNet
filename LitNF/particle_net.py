@@ -113,13 +113,13 @@ class ParticleNet(torch.nn.Module):
 
 
         self.output_mlp_linear = torch.nn.Linear(previous_output_shape, settings['output_classes'])
-        self.output_activation = torch.nn.Softmax(dim=1)
+        self.output_activation = torch.nn.Sigmoid()
 
     def forward(self, batch):
         # fts = self.input_bn(batch.x)
         batch=batch[:,:90].reshape(-1,30,3)
-        pts = batch[:,:,:2]
-        fts =batch[:,:,3]
+        pts = batch[:,:,:3]
+        fts =batch[:,:,:3]
 
         for idx, layer in enumerate(self.conv_process):
           fts = layer(pts, fts, batch)
@@ -131,7 +131,7 @@ class ParticleNet(torch.nn.Module):
             x = layer(x)
 
         x = self.output_mlp_linear(x)
-        # x = self.output_activation(x)
+        x = self.output_activation(x)
         return x
 
 
