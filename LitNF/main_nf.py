@@ -19,7 +19,7 @@ from torch.nn import functional as FF
 
 from helpers import *
 from jetnet_dataloader import JetNetDataloader
-from lit_nf import TransGan
+from lit_nf_flow import TransGan
 from plotting import plotting
 
 # from comet_ml import Experiment
@@ -30,8 +30,8 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     # Config is the only relevant parameter as it sets the trainings hyperparameters
     # hyperopt:whether to optimizer hyper parameters - load_ckpt: path to checkpoint if used
     data_module = JetNetDataloader(config,config["batch_size"]) #this loads the data
-    data_module.setup("training")
-    model = TransGan(config,hyperopt,data_module.num_batches) # the sets up the model,  config are hparams we want to optimize
+    
+    model = TransGan(config,hyperopt) # the sets up the model,  config are hparams we want to optimize
     model.data_module=data_module
     # Callbacks to use during the training, we  checkpoint our models
     
@@ -69,7 +69,7 @@ if __name__ == "__main__":
        "network_layers": 3,  # sets amount hidden layers in transformation networks -scannable
         "network_layers_nf": 2,  # sets amount hidden layers in transformation networks -scannable
         "network_nodes_nf": 256,  # amount nodes in hidden layers in transformation networks -scannable
-        "batch_size": 2000,  # sets batch size -scannable #best one 4000
+        "batch_size": 10000,  # sets batch size -scannable #best one 4000
         "coupling_layers": 15,  # amount of invertible transformations to use -scannable
         "lr": 0.001,  # sets learning rate -scannable
         "batchnorm": False,  # use batchnorm or not -scannable
@@ -81,7 +81,7 @@ if __name__ == "__main__":
         "canonical": False,  # transform data coordinates to px,py,pz -scannable
         "max_steps": 100000,  # how many steps to use at max - lower for quicker training
         "lambda": 10,  # balance between massloss and nll -scannable
-        "name": "Transflow_newest",  # name for logging folder
+        "name": "Transflow_flow",  # name for logging folder
         "disc": False,  # whether to train gan style discriminator that decides whether point is simulated or generated-semi-scannable
         "variable":1, #use variable amount of particles otherwise only use 30, options are true or False 
         "parton":"t", #choose the dataset you want to train options: t for top,q for quark,g for gluon
@@ -91,17 +91,17 @@ if __name__ == "__main__":
         "freq":10,
         "n_part":30,
         "fc":False,
-        "hidden":16,
-        "heads":3,
-        "l_dim":63,
+        "hidden":2,
+        "heads":1,
+        "l_dim":2,
         "lr_g":1e-4,
         "lr_d":1e-4,
         "lr_nf":0.000722,
         "sched":False,
-        "pretrain":30,
+        "pretrain":0,
         "opt":"RMSprop",
         "lambda":1,
-        "max_epochs":800,
+        "max_epochs":3000,
         "mass":True
     
     }     
@@ -122,20 +122,21 @@ if __name__ == "__main__":
             
             temproot=root
             
-            config["sched"]= np.random.choice([True,False])
-            config["opt"]= np.random.choice(["Adam","RMSprop"])
+            # config["sched"]= np.random.choice([True,False])
+           
             
-            config["mass"]= np.random.choice([True,False])
+           
 
-            config["freq"]=np.random.randint(3,15 )
+           
             config["seed"]=int(np.random.randint(1,1000))
-            config["lr_g"]=stats.loguniform.rvs(0.00001, 0.001,size=1)[0]
-
-            config["lr_d"]=config["lr_g"]
-            config["heads"]=np.random.randint(3,6 )
-            config["l_dim"]=config["heads"]*np.random.randint(15,30)
-            config["hidden"]=2**np.random.randint(8, 10)
-            config["num_layers"]=np.random.randint(2, 6)
+            config["lr_nf"]=stats.loguniform.rvs(0.00001, 0.01,size=1)[0]
+            config["network_layers"]= np.random.randint(1,4)
+            config["network_layers_nf"]= np.random.randint(1,4)
+            config["network_nodes_nf"]= 2**np.random.randint(8,11)
+            
+            config["coupling_layers"]= np.random.randint(7,20)
+           
+            
             
             
             print(config)

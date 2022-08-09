@@ -9,22 +9,7 @@ from helpers import *
 from nflows.distributions.base import Distribution
 import matplotlib.pyplot as plt
 from torch import optim
-class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
 
-            def __init__(self, optimizer, warmup, max_iters):
-                self.warmup = warmup
-                self.max_num_iters = max_iters
-                super().__init__(optimizer)
-
-            def get_lr(self):
-                lr_factor = self.get_lr_factor(epoch=self.last_epoch)
-                return [base_lr * lr_factor for base_lr in self.base_lrs]
-
-            def get_lr_factor(self, epoch):
-                lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.max_num_iters))
-                if epoch <= self.warmup:
-                    lr_factor *= epoch * 1.0 / self.warmup
-                return lr_factor
 class StandardScaler:
 
     def __init__(self, mean=None, std=None, epsilon=1e-7):
@@ -64,12 +49,12 @@ class JetNetDataloader(pl.LightningDataModule):
     '''This is more or less standard boilerplate coded that builds the data loader of the training
        one thing to note is the custom standard scaler that works on tensors
        Currently only jets with 30 particles are used but this maybe changes soon'''
-    def __init__(self,config): 
+    def __init__(self,config,batch_size): 
         super().__init__()
         self.config=config
         self.n_dim=config["n_dim"]
         self.n_part=config["n_part"]
-        self.batch_size=config["batch_size"]
+        self.batch_size=batch_size
     def setup(self,stage):
     # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
     # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
@@ -121,6 +106,7 @@ class JetNetDataloader(pl.LightningDataModule):
             
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
+        self.num_batches=self.data//self.config["batch_size"]
 #         assert self.data.shape[1]==92
         assert (torch.isnan(self.data)).sum()==0
     def train_dataloader(self):
