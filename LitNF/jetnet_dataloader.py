@@ -1,14 +1,17 @@
-import torch
-from torch.utils.data import DataLoader
-import pytorch_lightning as pl   
-from sklearn.model_selection import train_test_split
 import os
-import pandas as pd
-import numpy as np
-from helpers import *
-from nflows.distributions.base import Distribution
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytorch_lightning as pl
+import torch
+from nflows.distributions.base import Distribution
+from sklearn.model_selection import train_test_split
 from torch import optim
+from torch.utils.data import DataLoader
+
+from helpers import *
+
 
 class StandardScaler:
 
@@ -45,6 +48,8 @@ class StandardScaler:
 import pytorch_lightning as pl
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
+
+
 class JetNetDataloader(pl.LightningDataModule):
     '''This is more or less standard boilerplate coded that builds the data loader of the training
        one thing to note is the custom standard scaler that works on tensors
@@ -106,7 +111,7 @@ class JetNetDataloader(pl.LightningDataModule):
             
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
-        self.num_batches=self.data//self.config["batch_size"]
+        self.num_batches=len(self.data)//self.config["batch_size"]
 #         assert self.data.shape[1]==92
         assert (torch.isnan(self.data)).sum()==0
     def train_dataloader(self):

@@ -1,8 +1,8 @@
 import datetime
 import os
+import sys
 import time
 import traceback
-from pytorch_lightning.tuner.tuning import Tuner
 
 import pandas as pd
 import pytorch_lightning as pl
@@ -10,6 +10,7 @@ import ray
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import CometLogger, TensorBoardLogger
+from pytorch_lightning.tuner.tuning import Tuner
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.integration.pytorch_lightning import (
@@ -52,7 +53,7 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     
     trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=5,  # auto_scale_batch_size="binsearch",
                           max_epochs=config["max_epochs"], callbacks=callbacks, progress_bar_refresh_rate=int(not hyperopt)*10,
-                          check_val_every_n_epoch=5 ,num_sanity_val_steps=1,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
+                          check_val_every_n_epoch=config["val_check"] ,num_sanity_val_steps=2,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
                          fast_dev_run=False,default_root_dir=root)
     # This calls the fit function which trains the model
    
@@ -61,7 +62,7 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
 
 if __name__ == "__main__":
     
-    hyperopt = True  # This sets to run a hyperparameter optimization with ray or just running the training once
+    hyperopt = False  # This sets to run a hyperparameter optimization with ray or just running the training once
 
     config = {
         "autoreg":False,
@@ -81,39 +82,46 @@ if __name__ == "__main__":
         "canonical": False,  # transform data coordinates to px,py,pz -scannable
         "max_steps": 100000,  # how many steps to use at max - lower for quicker training
         "lambda": 10,  # balance between massloss and nll -scannable
-        "name": "Transflow_newest",  # name for logging folder
+        "name": "Transflow_best",  # name for logging folder
         "disc": False,  # whether to train gan style discriminator that decides whether point is simulated or generated-semi-scannable
         "variable":1, #use variable amount of particles otherwise only use 30, options are true or False 
         "parton":"t", #choose the dataset you want to train options: t for top,q for quark,g for gluon
-        "wgan":True,
+        "wgan":False,
         "corr":True,
         "num_layers":5,
         "freq":10,
         "n_part":30,
         "fc":False,
-        "hidden":16,
+        "hidden":80,
         "heads":3,
         "l_dim":63,
         "lr_g":1e-4,
         "lr_d":1e-4,
         "lr_nf":0.000722,
-        "sched":False,
-        "pretrain":30,
-        "opt":"RMSprop",
+        "sched":None,
+        "opt":"SGD",
         "lambda":1,
-        "max_epochs":800,
-        "mass":True
-    
+        "max_epochs":1600,
+        "mass":True,
+        "no_hidden":True,
+        "clf":True,
+        "val_check":50,
+        "frac_pretrain":80
     }     
+    config={'autoreg': False, 'context_features': 0, 'network_layers': 3, 'network_layers_nf': 2, 'network_nodes_nf': 256, 'batch_size': 1024, 'coupling_layers': 15, 'lr': 0.001, 'batchnorm': False, 'bins': 5, 'tail_bound': 6, 'limit': 150000, 'n_dim': 3, 'dropout': 0.2, 'canonical': False, 'max_steps': 100000, 'lambda': 1, 'name': 'Transflow_final', 'disc': False, 'variable': 1, 'parton': 't', 'wgan': False, 'corr': True, 'num_layers': 4, 'freq': 8, 'n_part': 30, 'fc': False, 'hidden': 500, 'heads': 4, 'l_dim': 100, 'lr_g': 0.0004327405312571664, 'lr_d': 0.0004327405312571664, 'lr_nf': 0.000722, 'sched': None, 'opt': 'Adam', 'max_epochs': 3200, 'mass': True, 'no_hidden': True, 'clf': True, 'val_check': 50, 'frac_pretrain': 40, 'seed': 744}
+        
     print(config["name"])
-    root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/"+datetime.datetime.now().strftime("%Y_%m_%d-%H_%M-%S")
+    if len(sys.argv)>2:
+        root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/run"+sys.argv[1]+"_"+str(sys.argv[2])
+    else:
+        root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]
     if not hyperopt:
         hyperopt=True
         train(config,hyperopt=hyperopt,root=root)
     else:
         # if not os.path.isfile("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"])):
         #     pd.DataFrame().to_csv("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"]))
-        num_samples = 30 # how many hparam settings to sample with ray
+        num_samples = 1 # how many hparam settings to sample with ray
         resources = {"cpu": 10, "gpu": 0.5}
         # This sets the logging in ray
         # reporter = CLIReporter(max_progress_rows=40, max_report_frequency=300, sort_by_metric=True,
@@ -122,22 +130,24 @@ if __name__ == "__main__":
             
             temproot=root
             
-            config["sched"]= np.random.choice([True,False])
-            config["opt"]= np.random.choice(["Adam","RMSprop"])
+            config["sched"]= np.random.choice(["cosine","cosine2",None])
+            config["opt"]= np.random.choice(["Adam","RMSprop","SGD"])
             
-            config["mass"]= np.random.choice([True,False])
 
+            config["mass"]= np.random.choice([True,False])
+            config["no_hidden"]= np.random.choice([True,False])
+            config["clf"]= np.random.choice([True,False])
+            config["batch_size"]=2**np.random.randint(8,12)
             config["freq"]=np.random.randint(3,15 )
             config["seed"]=int(np.random.randint(1,1000))
             config["lr_g"]=stats.loguniform.rvs(0.00001, 0.001,size=1)[0]
-
+      
             config["lr_d"]=config["lr_g"]
             config["heads"]=np.random.randint(3,6 )
             config["l_dim"]=config["heads"]*np.random.randint(15,30)
-            config["hidden"]=2**np.random.randint(8, 10)
+            config["hidden"]=100*np.random.randint(2,7)
             config["num_layers"]=np.random.randint(2, 6)
-            
-            
+
             print(config)
            
             try:
