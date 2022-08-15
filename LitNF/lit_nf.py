@@ -198,6 +198,7 @@ class TransGan(pl.LightningModule):
         self.gen_net = Gen(n_dim=self.n_dim,hidden=config["hidden"],num_layers=config["num_layers"],dropout=config["dropout"],no_hidden=config["no_hidden"],fc= config["fc"],n_part=config["n_part"],l_dim=config["l_dim"],num_heads=config["heads"]).cuda()
         self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],mass=self.config["mass"],  num_heads=config["heads"],fc=config["fc"],n_part=config["n_part"],dropout=config["dropout"],clf=config["clf"]).cuda()
         self.sig=nn.Sigmoid()
+        self.df=pd.DataFrame()
         for p in self.dis_net.parameters():
             if p.dim() > 1:
                 nn.init.xavier_normal(p)
@@ -307,8 +308,8 @@ class TransGan(pl.LightningModule):
             lr_scheduler_g=CosineWarmupScheduler(opt_g,warmup=15*self.num_batches,max_iters=(self.config["max_epochs"]-self.train_nf)*self.num_batches//self.freq_d)
         elif self.config["sched"]=="cosine2":   
             lr_scheduler_nf=CosineWarmupScheduler(opt_nf,warmup=1,max_iters=10000000*self.config["freq"]) 
-            lr_scheduler_d=CosineWarmupScheduler(opt_d,warmup=15*self.num_batches,max_iters=(self.config["max_epochs"]-self.train_nf//2)*self.num_batches//2)
-            lr_scheduler_g=CosineWarmupScheduler(opt_g,warmup=15*self.num_batches,max_iters=(self.config["max_epochs"]-self.train_nf)*self.num_batches//self.freq_d//2)
+            lr_scheduler_d=CosineWarmupScheduler(opt_d,warmup=self.train_nf//4*self.num_batches,max_iters=(self.config["max_epochs"]-self.train_nf//2)*self.num_batches//3)
+            lr_scheduler_g=CosineWarmupScheduler(opt_g,warmup=self.train_nf//2*self.num_batches,max_iters=(self.config["max_epochs"]-self.train_nf)*self.num_batches//self.freq_d//3)
         else:
             lr_scheduler_nf =None 
             lr_scheduler_d =None    
@@ -360,9 +361,9 @@ class TransGan(pl.LightningModule):
         summary.to_csv(self.summary_path,index_label=["path_index"])  
         return summary
     
-    def _results(self):
+    def _results(self,temp):
         self.metrics["step"].append(self.current_epoch)
-        self.df=pd.DataFrame.from_dict(self.metrics)
+        self.df=self.df.append(pd.DataFrame.from_dict(temp))
         self.df.to_csv(self.logger.log_dir+"result.csv",index_label=["index"])
     
    
@@ -376,21 +377,26 @@ class TransGan(pl.LightningModule):
             sched_nf,sched_d,sched_g=self.lr_schedulers()
             
 
-        nf_loss=0
 
-        gradient_penalty=0
         
         
-        ### NF PART
+        # ### NF PART
         if self.config["sched"]!=None:
-            self.log("lr_g",sched_g.get_last_lr()[-1],logger=True)
-            self.log("lr_nf",sched_nf.get_last_lr()[-1],logger=True)
-            self.log("lr_d",sched_d.get_last_lr()[-1],logger=True)
-            
+            self.log("lr_g",sched_g.get_last_lr()[-1],logger=True,on_epoch=True)
+            self.log("lr_nf",sched_nf.get_last_lr()[-1],logger=True,on_epoch=True)
+            self.log("lr_d",sched_d.get_last_lr()[-1],logger=True,on_epoch=True)
+        sched_d.step()
+        
+       
+        
+        
+        if (self.current_epoch>self.train_nf and self.global_step%self.freq_d<2) or self.global_step==2 :
+            sched_g.step()
+
         if self.current_epoch<self.train_nf:
             if self.config["sched"]!=None:
                 sched_nf.step()
-            nf_loss -=self.flow.to(self.device).log_prob(batch).mean()#c if self.config["context_features"] else None
+            nf_loss =-self.flow.to(self.device).log_prob(batch).mean()#c if self.config["context_features"] else None
             nf_loss/=(self.n_dim*self.n_part) 
             opt_nf.zero_grad()
             self.manual_backward(nf_loss)
@@ -543,11 +549,11 @@ class TransGan(pl.LightningModule):
             print("no convergence, stop training")
             raise
         
-        temp={"val_logprob":float(logprob.numpy()),"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":self.metrics["val_w1m"][-1],"val_w1efp":self.metrics["val_w1efp"][-1],"val_w1p":self.metrics["val_w1p"][-1],"step":self.global_step}
+        temp={"val_logprob":float(logprob.numpy()),"val_fpnd":fpndv,"val_mmd":mmd,"val_cov":cov,"val_w1m":float(self.metrics["val_w1m"][-1]),"val_w1efp":float(self.metrics["val_w1efp"][-1]),"val_w1p":float(self.metrics["val_w1p"][-1]),"step":self.global_step}
         print("epoch {}: ".format(self.current_epoch),temp)
         if self.hyperopt and self.global_step>3:
             try:
-                self._results()
+                self._results(temp)
             except:
                 print("error in results")
             summary=self._summary(temp)

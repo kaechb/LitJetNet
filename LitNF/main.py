@@ -51,9 +51,9 @@ def train(config, hyperopt=False, load_ckpt=None,i=0,root=None):
     #log every n steps could be important as it decides how often it should log to tensorboard
     # Also check val every n epochs, as validation checking takes some time
     
-    trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=5,  # auto_scale_batch_size="binsearch",
+    trainer = pl.Trainer(gpus=1, logger=logger,  log_every_n_steps=1000,  # auto_scale_batch_size="binsearch",
                           max_epochs=config["max_epochs"], callbacks=callbacks, progress_bar_refresh_rate=int(not hyperopt)*10,
-                          check_val_every_n_epoch=config["val_check"] ,num_sanity_val_steps=2,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
+                          check_val_every_n_epoch=config["val_check"] ,num_sanity_val_steps=1,#gradient_clip_val=.02, gradient_clip_algorithm="norm",
                          fast_dev_run=False,default_root_dir=root)
     # This calls the fit function which trains the model
    
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         "lr_g":1e-4,
         "lr_d":1e-4,
         "lr_nf":0.000722,
-        "sched":None,
+        "sched":"cosine2",
         "opt":"SGD",
         "lambda":1,
         "max_epochs":1600,
@@ -107,16 +107,22 @@ if __name__ == "__main__":
         "clf":True,
         "val_check":50,
         "frac_pretrain":80
-    }     
-    config={'autoreg': False, 'context_features': 0, 'network_layers': 3, 'network_layers_nf': 2, 'network_nodes_nf': 256, 'batch_size': 1024, 'coupling_layers': 15, 'lr': 0.001, 'batchnorm': False, 'bins': 5, 'tail_bound': 6, 'limit': 150000, 'n_dim': 3, 'dropout': 0.2, 'canonical': False, 'max_steps': 100000, 'lambda': 1, 'name': 'Transflow_final', 'disc': False, 'variable': 1, 'parton': 't', 'wgan': False, 'corr': True, 'num_layers': 4, 'freq': 8, 'n_part': 30, 'fc': False, 'hidden': 500, 'heads': 4, 'l_dim': 100, 'lr_g': 0.0004327405312571664, 'lr_d': 0.0004327405312571664, 'lr_nf': 0.000722, 'sched': None, 'opt': 'Adam', 'max_epochs': 3200, 'mass': True, 'no_hidden': True, 'clf': True, 'val_check': 50, 'frac_pretrain': 40, 'seed': 744}
+    }  
+    cols=["name","parton","mass","sched","opt","no_hidden","clf","batch_size","freq","seed","lr_g","heads","hidden","l_dim","num_layers","val_check"]   
+    config={'autoreg': False, 'context_features': 0, 'network_layers': 3, 'network_layers_nf': 2, 'network_nodes_nf': 256, 'batch_size': 1024, 'coupling_layers': 15, 'lr': 0.001, 'batchnorm': False, 'bins': 5, 'tail_bound': 6, 'limit': 150000, 'n_dim': 3, 'dropout': 0.2, 'canonical': False, 'max_steps': 100000, 'lambda': 1, 'name': 'Transflow_best', 'disc': False, 'variable': 1, 'parton': 't', 'wgan': False, 'corr': True, 'num_layers': 4, 'freq': 6, 'n_part': 30, 'fc': False, 'hidden': 500, 'heads': 4, 'l_dim': 25, 'lr_g': 0.0004327405312571664, 'lr_d': 0.0004327405312571664, 'lr_nf': 0.000722, 'sched': "cosine2", 'opt': 'RMSprop', 'max_epochs': 3200, 'mass': True, 'no_hidden': False, 'clf': True, 'val_check': 50, 'frac_pretrain': 80,"seed":69 }#'seed': 744,sched:"None","wgan":False,"freq":8,"sched":None,"heads":4
+    config["l_dim"]=config["l_dim"]*config["heads"]
         
     print(config["name"])
+
     if len(sys.argv)>2:
         root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]+"/run"+sys.argv[1]+"_"+str(sys.argv[2])
     else:
         root="/beegfs/desy/user/"+os.environ["USER"]+"/"+config["name"]
     if not hyperopt:
         hyperopt=True
+        for col in cols:
+                print('"'+col+'":'+str(config[col]))
+
         train(config,hyperopt=hyperopt,root=root)
     else:
         # if not os.path.isfile("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"])):
@@ -147,8 +153,10 @@ if __name__ == "__main__":
             config["l_dim"]=config["heads"]*np.random.randint(15,30)
             config["hidden"]=100*np.random.randint(2,7)
             config["num_layers"]=np.random.randint(2, 6)
+            
+            for col in cols:
+                print('"'+col+'":'+str(config["col"]))
 
-            print(config)
            
             try:
                 train(config,hyperopt=hyperopt,i=i,root=temproot)
