@@ -22,6 +22,7 @@ from plotting import plotting
 
 
 def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
+
     # This function is a wrapper for the hyperparameter optimization module called ray
     # Its parameters hyperopt and load_ckpt are there for convenience
     # Config is the only relevant parameter as it sets the trainings hyperparameters
@@ -38,7 +39,14 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
         ModelCheckpoint(
             monitor="val_w1m",
             save_top_k=2,
-            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}",
+            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}-{val_w1efp:.6f}",
+            dirpath=root,
+            every_n_epochs=10,
+        ),
+        ModelCheckpoint(
+            monitor="val_fpnd",
+            save_top_k=2,
+            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}-{val_w1efp:.6f}",
             dirpath=root,
             every_n_epochs=10,
         )
@@ -62,7 +70,7 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
-        log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
+        log_every_n_steps=1000,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
         progress_bar_refresh_rate=int(not hyperopt) * 10,
@@ -148,7 +156,7 @@ if __name__ == "__main__":
         "network_layers": 3,
         "network_layers_nf": 2,
         "network_nodes_nf": 256,
-        "batch_size": 1024,
+        "batch_size": 1024,#1024 best
         "coupling_layers": 15,
         "lr": 0.001,
         "batchnorm": False,
@@ -178,64 +186,76 @@ if __name__ == "__main__":
         "lr_nf": 0.000722,
         "sched": "cosine2",
         "opt": "Adam",
-        "max_epochs": 3200,
+        "max_epochs": 1600,
         "mass": True,
         "no_hidden": False,
         "clf": True,
-        "val_check": 50,
-        "frac_pretrain": 80,
+        "val_check": 25,
+        "frac_pretrain": 40,
         "seed": 69,
         "quantile": False,
     }  #'seed': 744,sched:"None","wgan":False,"freq":8,"sched":None,"heads":4
+    config["frac_pretrain"]=config["max_epochs"]//40
     config["l_dim"] = config["l_dim"] * config["heads"]
 
     print(config["name"])
 
-    if len(sys.argv) > 2:
-        root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/"+config["parton"]+"_" +"run"+sys.argv[1]+"_"+str(sys.argv[2])
-    else:
-        root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["parton"]+"_" + config["name"]
+    
+    
     if not hyperopt:
         hyperopt = True
         for col in cols:
             print('"' + col + '":' + str(config[col]))
-
+        print("NOT HYPEROPT")
+        root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["parton"]+"_" + config["name"]
         train(config, hyperopt=hyperopt, root=root)
     else:
-        # if not os.path.isfile("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"])):
-        #     pd.DataFrame().to_csv("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"]))
+
         num_samples = 1  # how many hparam settings to sample with ray
-        resources = {"cpu": 10, "gpu": 0.5}
-        # This sets the logging in ray
-        # reporter = CLIReporter(max_progress_rows=40, max_report_frequency=300, sort_by_metric=True,
-        #                        metric="logprob", parameter_columns=["network_nodes", "network_layers", "coupling_layers", "lr"])
+        resources = {"cpu": 10, "gpu": 0.5}       
         for i in range(num_samples):
-
-            temproot = root
-
+            
             config["sched"] = np.random.choice(["cosine", "cosine2", None])
-            #config["opt"] = np.random.choice(["Adam", "RMSprop"])
-            #config["mass"] = np.random.choice([True, False])
+            config["opt"] = np.random.choice(["Adam", "AdamW","RMSprop"])
+            config["mass"] = np.random.choice([True, False])
             config["quantile"] = np.random.choice([True, False])
+            config["wgan"] = np.random.choice([False])#True, 
+
             config["no_hidden"] = np.random.choice([True, False,"more"])
-            config["clf"] = np.random.choice([True, False])
-            # config["batch_size"] = 2 ** np.random.randint(8, 12)
+            # config["clf"] = np.random.choice([True, False])
+            config["batch_size"] = 2 ** np.random.randint(8, 12)
             config["freq"] = np.random.randint(5, 10)
             config["seed"] = int(np.random.randint(1, 1000))
-            
-            # config["lr_g"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
-            
-            
+            config["lr_g"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
+            config["lr_nf"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
             config["heads"] = np.random.randint(3, 6)
-            config["l_dim"] = config["heads"] * 25
+            config["l_dim"] = config["heads"] * np.random.randint(10, 30)
             # config["hidden"] = 100 * np.random.randint(2, 7)
             config["num_layers"] = np.random.randint(3, 6)
+            config["parton"]=np.random.choice(["t","q","g"])
 
+            config["name"] = config["name"] + "_" + config["parton"]
+            print(config["parton"])
+            if len(sys.argv) > 2:
+                root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/run"+sys.argv[1]+"_"+str(sys.argv[2])
+                print(root)
+            else:
+                root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["name"]
             for col in cols:
                 print('"' + col + '":' + str(config[col]))
+            if config["parton"]=="q":
+                config["network_layers_nf"]=2
+                config["network_nodes_nf"]=256
+                config["tail_bound"]=6
+                config["lr_nf"]=0.00047352
 
+            if config["parton"]=="t":
+                config["network_layers_nf"]=2
+                config["network_nodes_nf"]=128
+                config["tail_bound"]=6
+                config["lr_nf"]=0.00067486
             try:
-                train(config, hyperopt=hyperopt, i=i, root=temproot)
+                train(config, hyperopt=hyperopt, i=i, root=root)
             except:
                 print("error")
                 traceback.print_exc()

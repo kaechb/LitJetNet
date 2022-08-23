@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=allgpu
 #SBATCH --constraint='P100'|'V100'|'A100'
-#SBATCH --time=24:00:00                           # Maximum time requested
+#SBATCH --time=72:00:00                           # Maximum time requested
 #SBATCH --nodes=1                          # Number of nodes
 #SBATCH --chdir=/home/kaechben/slurm        # directory must already exist!
 #SBATCH --job-name=hostname
@@ -66,4 +66,21 @@ conda activate jetnet
 #     sleep 5
 # done
 path=JetNet_NF
-python -u /home/$USER/$path/LitJetNet/LitNF/main.py
+if [ $# -eq 0 ]
+  then
+    python -u /home/$USER/$path/LitJetNet/LitNF/main.py 
+  else 
+    python -u /home/$USER/$path/LitJetNet/LitNF/main.py $1 $2
+fi
+
+# p="t"
+# typ="c"
+# c=0
+# # for typ in cc c
+# # do
+# # for c in 2 1 0
+# # do 
+
+# python -u /home/$USER/$path/LitJetNet/LitNF/best_models.py $p $typ $c 
+# done
+# done

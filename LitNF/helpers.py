@@ -20,17 +20,16 @@ class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
         return lr_factor
 
 
-def mass(data, canonical=False):
-    if canonical:
-        n_dim = data.shape[1]
-        p = data.reshape(-1, n_dim // 3, 3)
+def mass(data, mask=None, canonical=False):
+    data = data.reshape(len(data),30, 3) * mask.reshape(len(data), 30, 1)
+    mask=mask.to(data.device)
+    if canonical:        
+        p = data
         px = p[:, :, 0]
         py = p[:, :, 1]
         pz = p[:, :, 2]
-
-    else:
-        n_dim = data.shape[1]
-        p = data.reshape(-1, n_dim // 3, 3)
+    else: 
+        p = data
         px = torch.cos(p[:, :, 1]) * p[:, :, 2]
         py = torch.sin(p[:, :, 1]) * p[:, :, 2]
         pz = torch.sinh(p[:, :, 0]) * p[:, :, 2]
@@ -41,10 +40,7 @@ def mass(data, canonical=False):
     E = E.sum(axis=1) ** 2
     p = px.sum(axis=1) ** 2 + py.sum(axis=1) ** 2 + pz.sum(axis=1) ** 2
     m2 = E - p
-    # if m2.isnan().any():
-    #     print("px:{} py:{} pz:{} ".format(px.abs().max(),py.abs().max(),pz.abs().max()))
-    # assert m2.isnan().sum()==0
-    return torch.sqrt(torch.max(m2, torch.zeros(len(E)).to(E.device)))
+    return torch.sqrt(m2)
 
 
 def preprocess(data, rev=False):
@@ -52,10 +48,7 @@ def preprocess(data, rev=False):
     data = data.reshape(-1, n_dim // 3, 3)
     p = torch.zeros_like(data)
     if rev:
-        p[:, :, 0] = torch.arctanh(
-            data[:, :, 2]
-            / torch.sqrt(data[:, :, 0] ** 2 + data[:, :, 1] ** 2 + data[:, :, 2] ** 2)
-        )
+        p[:, :, 0] = torch.arctanh(data[:, :, 2] / torch.sqrt(data[:, :, 0] ** 2 + data[:, :, 1] ** 2 + data[:, :, 2] ** 2))
         p[:, :, 1] = torch.atan2(data[:, :, 1], data[:, :, 0])
         p[:, :, 2] = torch.sqrt(data[:, :, 0] ** 2 + data[:, :, 1] ** 2)
 
@@ -65,8 +58,6 @@ def preprocess(data, rev=False):
         p[:, :, 1] = data[:, :, 2] * torch.sin(data[:, :, 1])
         p[:, :, 2] = data[:, :, 2] * torch.sinh(data[:, :, 0])
     return p.reshape(-1, n_dim)
-
-
 
 
 def mmd(x, y, device, kernel="rbf"):
@@ -127,9 +118,7 @@ class Rational(torch.nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.coeffs.data = torch.Tensor(
-            [[1.1915, 0.0], [1.5957, 2.383], [0.5, 0.0], [0.0218, 1.0]]
-        )
+        self.coeffs.data = torch.Tensor([[1.1915, 0.0], [1.5957, 2.383], [0.5, 0.0], [0.0218, 1.0]])
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         self.coeffs.data[0, 1].zero_()
