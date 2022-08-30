@@ -22,7 +22,6 @@ class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
 
 def mass(data, mask=None, canonical=False):
     data = data.reshape(len(data),30, 3) * mask.reshape(len(data), 30, 1)
-    mask=mask.to(data.device)
     if canonical:        
         p = data
         px = p[:, :, 0]
@@ -33,9 +32,7 @@ def mass(data, mask=None, canonical=False):
         px = torch.cos(p[:, :, 1]) * p[:, :, 2]
         py = torch.sin(p[:, :, 1]) * p[:, :, 2]
         pz = torch.sinh(p[:, :, 0]) * p[:, :, 2]
-    px = torch.clamp(px, min=-100, max=100)
-    py = torch.clamp(py, min=-100, max=100)
-    pz = torch.clamp(pz, min=-100, max=100)
+    
     E = torch.sqrt(px**2 + py**2 + pz**2)
     E = E.sum(axis=1) ** 2
     p = px.sum(axis=1) ** 2 + py.sum(axis=1) ** 2 + pz.sum(axis=1) ** 2

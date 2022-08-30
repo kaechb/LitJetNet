@@ -76,24 +76,30 @@ class JetNetDataloader(pl.LightningDataModule):
         masks = data.values[:, np.arange(3, 120, 4)][:limit] # zero padded particles are masked and given as feature
         df = data.drop(np.arange(3, 120, 4), axis=1)[:limit]
         self.n = masks.sum(axis=1) # number particles per jet
+
+        masks=~masks.astype(bool)
         z = torch.tensor(df.values).reshape(len(df), 30, 3)
         m = (torch.tensor(masks).reshape(len(df), 30)).bool()
 
         self.data = z
-        mass_ = mass(self.data, mask=m)
-        self.data[~m, :] = torch.normal(mean=torch.zeros_like(self.data[~m, :]), std=1).abs() * 1e-7
+
+        self.data[m, :] = torch.normal(mean=torch.zeros_like(self.data[m, :]), std=1).abs() * 1e-7
         # standard scaling
-
-        self.scaler = StandardScaler()
-        if self.config["quantile"]:
-            self.ptscaler = QuantileTransformer(output_distribution="normal")
-
-            self.data[:, :, :2] = self.scaler.fit_transform(self.data[:, :, :2])
-            self.data[:, :, 2] = torch.tensor(self.ptscaler.fit_transform(self.data[:, :, 2].numpy()))
-            self.min_pt = self.data[:, :, 2].min(axis=0)[0]
-            self.data = self.data.reshape(len(self.data), 90)
-        else:
-            self.data = self.scaler.fit_transform(self.data)
+        self.scalers=[]
+        self.ptscalers=[]
+        self.data=self.data.float()
+        for i in range(30):
+            self.scalers.append(StandardScaler())
+            # self.scaler = 
+            if self.config["quantile"]:
+                self.ptscalers.append( QuantileTransformer(output_distribution="normal"))
+                self.data[~m[:,i],i,:2] = self.scalers[i].fit_transform(self.data[~m[:,i],i, :2])
+                self.data[~m[:,i],i, 2] = torch.tensor(self.ptscalers[i].fit_transform(self.data[~m[:,i],i, 2].reshape(-1,1).numpy())).reshape(-1)
+                self.min_pt = self.data[~m[:,i],i, :2].min(axis=0)[0]
+                
+            else:
+                self.data[~m[:,i],i, :] = self.scalers[i].fit_transform(self.data[~m[:,i],i, :])
+        self.data = self.data.reshape(len(self.data), 90)
         self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data), self.n_part * self.n_dim), m)))
         self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
 

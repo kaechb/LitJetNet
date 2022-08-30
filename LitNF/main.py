@@ -40,15 +40,15 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
             monitor="val_w1m",
             save_top_k=2,
             filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}-{val_w1efp:.6f}",
-            dirpath=root,
-            every_n_epochs=10,
+            dirpath=None,
+            every_n_epochs=config["val_check"],
         ),
         ModelCheckpoint(
             monitor="val_fpnd",
             save_top_k=2,
             filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}-{val_w1efp:.6f}",
-            dirpath=root,
-            every_n_epochs=10,
+            dirpath=None,
+            every_n_epochs=config["val_check"],
         )
     ]
 
@@ -70,7 +70,7 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
-        log_every_n_steps=1000,  # auto_scale_batch_size="binsearch",
+        log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
         progress_bar_refresh_rate=int(not hyperopt) * 10,
@@ -151,15 +151,13 @@ if __name__ == "__main__":
         "val_check",
     ]
     config = {
-        "autoreg": False,
-        "context_features": 0,
-        "network_layers": 3,
+        "context_features": 1,
         "network_layers_nf": 2,
         "network_nodes_nf": 256,
         "batch_size": 1024,#1024 best
         "coupling_layers": 15,
         "lr": 0.001,
-        "batchnorm": False,
+        "batchnorm": True,
         "bins": 5,
         "tail_bound": 6,
         "limit": 200000,
@@ -168,12 +166,10 @@ if __name__ == "__main__":
         "canonical": False,
         "max_steps": 100000,
         "lambda": 100,
-        "name": "Transflow_final",
+        "name": "Transflow_batchnorm",
         "disc": False,
-        "variable": 1,
         "parton": "q",
-        "wgan": True,
-        "corr": True,
+        "wgan": False,
         "num_layers": 4,
         "freq": 6,
         "n_part": 30,
@@ -184,24 +180,21 @@ if __name__ == "__main__":
         "lr_g": 0.0004327405312571664,
         "lr_d": 0.0004327405312571664,
         "lr_nf": 0.000722,
-        "sched": "cosine2",
+        "sched": "cosine",
         "opt": "Adam",
-        "max_epochs": 1600,
+        "max_epochs": 800,
         "mass": True,
         "no_hidden": False,
         "clf": True,
         "val_check": 25,
         "frac_pretrain": 40,
         "seed": 69,
-        "quantile": False,
+        "quantile": True,
     }  #'seed': 744,sched:"None","wgan":False,"freq":8,"sched":None,"heads":4
     config["frac_pretrain"]=config["max_epochs"]//40
     config["l_dim"] = config["l_dim"] * config["heads"]
 
     print(config["name"])
-
-    
-    
     if not hyperopt:
         hyperopt = True
         for col in cols:
@@ -216,26 +209,28 @@ if __name__ == "__main__":
         for i in range(num_samples):
             
             config["sched"] = np.random.choice(["cosine", "cosine2", None])
-            config["opt"] = np.random.choice(["Adam", "AdamW","RMSprop"])
+            config["opt"] = np.random.choice(["Adam", "AdamW"])#True, 
             config["mass"] = np.random.choice([True, False])
-            config["quantile"] = np.random.choice([True, False])
-            config["wgan"] = np.random.choice([False])#True, 
+            # config["quantile"] = np.random.choice([True, False])
+            config["wgan"] = np.random.choice([True, False])#
 
-            config["no_hidden"] = np.random.choice([True, False,"more"])
+            config["no_hidden"] = np.random.choice([True, False,])
             # config["clf"] = np.random.choice([True, False])
             config["batch_size"] = 2 ** np.random.randint(8, 12)
-            config["freq"] = np.random.randint(5, 10)
+            config["freq"] = np.random.choice([1,3,7])
             config["seed"] = int(np.random.randint(1, 1000))
-            config["lr_g"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
+            config["lr_g"] = stats.loguniform.rvs(0.0001, 0.001, size=1)[0]
             config["lr_nf"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
-            config["heads"] = np.random.randint(3, 6)
+            config["heads"] = np.random.randint(3, 8)
             config["l_dim"] = config["heads"] * np.random.randint(10, 30)
             # config["hidden"] = 100 * np.random.randint(2, 7)
             config["num_layers"] = np.random.randint(3, 6)
             config["parton"]=np.random.choice(["t","q","g"])
-
+            # config["parton"] = "q"
+            config["norm"] = np.random.choice([True,False])
             config["name"] = config["name"] + "_" + config["parton"]
             print(config["parton"])
+            
             if len(sys.argv) > 2:
                 root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/run"+sys.argv[1]+"_"+str(sys.argv[2])
                 print(root)
@@ -248,7 +243,7 @@ if __name__ == "__main__":
                 config["network_nodes_nf"]=256
                 config["tail_bound"]=6
                 config["lr_nf"]=0.00047352
-
+                config["quantile"]=True
             if config["parton"]=="t":
                 config["network_layers_nf"]=2
                 config["network_nodes_nf"]=128
