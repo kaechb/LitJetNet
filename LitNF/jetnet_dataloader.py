@@ -69,9 +69,7 @@ class JetNetDataloader(pl.LightningDataModule):
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
         data_dir = os.environ["HOME"] + "/JetNet_NF/train_{}_jets.csv".format(self.config["parton"])
         data = pd.read_csv(data_dir, sep=" ", header=None)
-        df = pd.DataFrame()
         limit = int(self.config["limit"] * 1.1)
-
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
         masks = data.values[:, np.arange(3, 120, 4)][:limit] # zero padded particles are masked and given as feature
         df = data.drop(np.arange(3, 120, 4), axis=1)[:limit]

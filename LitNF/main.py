@@ -17,6 +17,7 @@ from helpers import *
 from jetnet_dataloader import JetNetDataloader
 from lit_nf import TransGan
 from plotting import plotting
+from pytorch_lightning.profiler import SimpleProfiler
 
 # from comet_ml import Experiment
 
@@ -67,10 +68,11 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
     # log every n steps could be important as it decides how often it should log to tensorboard
     # Also check val every n epochs, as validation checking takes some time
 
+    profiler = SimpleProfiler()
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
-        log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
+        log_every_n_steps=10,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
         progress_bar_refresh_rate=int(not hyperopt) * 10,
@@ -78,6 +80,7 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
         num_sanity_val_steps=1,  # gradient_clip_val=.02, 
         fast_dev_run=False,
         default_root_dir=root,
+        profiler=profiler
     )
     # This calls the fit function which trains the model
 
@@ -132,24 +135,7 @@ if __name__ == "__main__":
     #     "val_check": 50,
     #     "frac_pretrain": 80,
     # }
-    cols = [
-        "name",
-        "parton",
-        "mass",
-        "sched",
-        "opt",
-        "no_hidden",
-        "clf",
-        "batch_size",
-        "freq",
-        "seed",
-        "lr_g",
-        "heads",
-        "hidden",
-        "l_dim",
-        "num_layers",
-        "val_check",
-    ]
+
     config = {
         "context_features": 1,
         "network_layers_nf": 2,
@@ -166,7 +152,7 @@ if __name__ == "__main__":
         "canonical": False,
         "max_steps": 100000,
         "lambda": 100,
-        "name": "Transflow_batchnorm",
+        "name": "Transflow_final",
         "disc": False,
         "parton": "q",
         "wgan": False,
@@ -182,7 +168,7 @@ if __name__ == "__main__":
         "lr_nf": 0.000722,
         "sched": "cosine",
         "opt": "Adam",
-        "max_epochs": 800,
+        "max_epochs": 1600,
         "mass": True,
         "no_hidden": False,
         "clf": True,
@@ -197,8 +183,8 @@ if __name__ == "__main__":
     print(config["name"])
     if not hyperopt:
         hyperopt = True
-        for col in cols:
-            print('"' + col + '":' + str(config[col]))
+        # for col in cols:
+        #     print('"' + col + '":' + str(config[col]))
         print("NOT HYPEROPT")
         root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["parton"]+"_" + config["name"]
         train(config, hyperopt=hyperopt, root=root)
@@ -208,21 +194,23 @@ if __name__ == "__main__":
         resources = {"cpu": 10, "gpu": 0.5}       
         for i in range(num_samples):
             
-            config["sched"] = np.random.choice(["cosine", "cosine2", None])
+            config["sched"] = np.random.choice(["cosine", None])
             config["opt"] = np.random.choice(["Adam", "AdamW"])#True, 
             config["mass"] = np.random.choice([True, False])
             # config["quantile"] = np.random.choice([True, False])
             config["wgan"] = np.random.choice([True, False])#
+            config["batchnorm"] = np.random.choice([True, False])#
 
             config["no_hidden"] = np.random.choice([True, False,])
             # config["clf"] = np.random.choice([True, False])
-            config["batch_size"] = 2 ** np.random.randint(8, 12)
+            config["batch_size"] = int(np.random.choice([512, 1024]))
             config["freq"] = np.random.choice([1,3,7])
             config["seed"] = int(np.random.randint(1, 1000))
             config["lr_g"] = stats.loguniform.rvs(0.0001, 0.001, size=1)[0]
             config["lr_nf"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
-            config["heads"] = np.random.randint(3, 8)
+            config["heads"] = np.random.randint(4, 8)
             config["l_dim"] = config["heads"] * np.random.randint(10, 30)
+
             # config["hidden"] = 100 * np.random.randint(2, 7)
             config["num_layers"] = np.random.randint(3, 6)
             config["parton"]=np.random.choice(["t","q","g"])
@@ -236,8 +224,9 @@ if __name__ == "__main__":
                 print(root)
             else:
                 root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["name"]
-            for col in cols:
-                print('"' + col + '":' + str(config[col]))
+            print(config)
+            # for col in cols:
+            #     print('"' + col + '":' + str(config[col]))
             if config["parton"]=="q":
                 config["network_layers_nf"]=2
                 config["network_nodes_nf"]=256

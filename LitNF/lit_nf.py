@@ -169,7 +169,7 @@ class Disc(nn.Module):
             x = self.embbed(x)
             if self.clf:
                 x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
-                mask = torch.concat((torch.ones_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device)
+                mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device)
 
                 x = self.encoder(x, src_key_padding_mask=mask)
                 x = x[:, 0, :]
@@ -275,15 +275,42 @@ class TransGan(pl.LightningModule):
         for p in self.gen_net.parameters():
             if p.dim() > 1:
                 nn.init.xavier_normal_(p)
-        self.gen_net.out.weight.data.fill_(0)
+        self.gen_net.out.weight.data.uniform_(-0.01,0.01)
         self.gen_net.out.bias.data.fill_(0)
-    
+        self.gen_net.out2.weight.data.uniform_(-0.01,0.01)
+        self.gen_net.out2.bias.data.fill_(0)
         self.nf_train = True
         self.train_nf = config["max_epochs"] // config["frac_pretrain"]
 
     def load_datamodule(self, data_module):
         """needed for lightning training to work, it just sets the dataloader for training and validation"""
         self.data_module = data_module
+    
+    def plot_mass(self,m_f,m_t=None,postfix=""):
+        fig=plt.figure()
+        if not m_t==None:
+            _,bins,_=plt.hist(m_t.cpu().detach().numpy(),bins=30,label="True",histtype="step")
+            plt.hist(m_f.cpu().detach().numpy(),bins=bins,label="Fake",histtype="step")
+        else:
+            plt.hist(m_f[m_f<500].cpu().detach().numpy(),bins=30,label="True",histtype="step")
+        plt.legend()
+        plt.ylabel("Counts")
+        plt.xlabel("Critic Score")
+        plt.yscale("log")
+        self.logger.experiment.add_figure("train_mass"+postfix, fig, global_step=self.current_epoch)
+        plt.close()
+    
+    def plot_class(self,pred_real,pred_fake,mask):
+        fig, ax = plt.subplots()
+        ax.hist(pred_real.detach().cpu().numpy(), label="real", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
+        ax.hist(pred_fake.detach().cpu().numpy(), label="fake", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
+        ax.hist(pred_real[mask.sum(1)].detach().cpu().numpy(), label="real<30", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
+        ax.hist(pred_fake[mask.sum(1)].detach().cpu().numpy(), label="fake<30", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
+        ax.legend()
+        plt.ylabel("Counts")
+        plt.xlabel("Critic Score")
+        self.logger.experiment.add_figure("class_train", fig, global_step=self.current_epoch)
+        plt.close()
 
     def on_after_backward(self) -> None:
         """This is a genious little hook, sometimes my model dies, i have no clue why. This saves the training from crashing and continues"""
@@ -294,10 +321,10 @@ class TransGan(pl.LightningModule):
                 if not valid_gradients:
                     break
         if not valid_gradients:
-            print("not valid grads", self.counter)
+            
             self.zero_grad()
             self.counter += 1
-            if self.counter > 5:
+            if self.counter > 8:
                 raise ValueError("5 nangrads in a row")
         else:
             self.counter = 0
@@ -314,115 +341,12 @@ class TransGan(pl.LightningModule):
                     transform_net_create_fn=self.create_resnet,
                     tails="linear",
                     tail_bound=self.config["tail_bound"],
-                    num_bins=self.config["bins"],
-                    
-                )
-            ]
-
+                    num_bins=self.config["bins"],)]
         self.q0 = nf.distributions.normal.StandardNormal([self.n_dim * self.n_part])
         # Creates working flow model from the list of layer modules
         self.flows = CompositeTransform(self.flows)
         # Construct flow model
         self.flow = base.Flow(distribution=self.q0, transform=self.flows)
-
-    def scale(self, x,m): 
-        x = x.reshape(len(x), self.n_part, self.n_dim)
-        # self.data_module.scaler = self.data_module.scaler.to(x.device)
-        for i in range(30):
-            if self.config["quantile"]:
-
-                x[~m[:,i] ,i, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(x[~m[:,i] ,i, 2].cpu().numpy().reshape(-1,1)).reshape(-1)).to(x.device)
-                x[~m[:,i] ,i, :2] = self.data_module.scalers[i].inverse_transform(x[~m[:,i] ,i, :2].float())
-            
-            else:
-                x[~m[:,i],i,:]= self.data_module.scalers[i].inverse_transform(x[~m[:,i],i,:])
-        return x
-
-    def sampleandscale(self, batch, mask, mask_test=None, scale=False):
-        """This is a helper function that samples from the flow (i.e. generates a new sample)
-        and reverses the standard scaling that is done in the preprocessing. This allows to calculate the mass
-        on the generative sample and to compare to the simulated one, we need to inverse the scaling before calculating the mass
-        because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
-        mask=mask.bool()
-        if mask_test!=None:
-            mask_test=mask_test.bool()
-        else:
-            mask_test=mask
-        # with torch.no_grad():
-        z = self.flow.sample(len(batch) if not self.config["context_features"] else 1, context=None if not self.config["context_features"]
-                            else (~mask_test).sum(1).float().reshape(-1,1)).reshape(len(batch), self.n_part, self.n_dim).detach().requires_grad_(True)
-        fake = z + self.gen_net(z, mask=mask_test)  # (1-self.alpha)*
-        fake = fake.reshape(len(batch), self.n_part, self.n_dim)
-        if scale:
-            fake_scaled, z_scaled, true = (self.scale(fake.clone(),mask_test).to(batch.device),
-                                           self.scale(z.clone(),mask_test).to(batch.device), self.scale(batch.clone(),mask).to(batch.device))
-            true = true * (~mask.reshape(len(batch), self.n_part, 1))
-            z_scaled = z_scaled * (~mask_test.reshape(len(batch), self.n_part, 1))
-            fake_scaled = fake_scaled * (~mask_test.reshape(len(batch), self.n_part, 1))
-            return fake.to(batch.device), batch, z.to(batch.device), fake_scaled, true, z_scaled
-        else:
-            return fake
-
-    def train_disc(self,  batch,mask,opt_d,sched_d=None):
-        if self.config["sched"] != None:
-            sched_d.step()
-        if self.wgan:  # this is for grad div/penalty
-            batch.requires_grad = True
-        batch = batch.reshape(len(batch), self.n_part, self.n_dim)
-        fake = self.sampleandscale(batch, mask, scale=False)
-        fake = fake.detach()
-        if self.wgan:  # this allows calculation of gradients with respect to inputs
-            fake = fake.requires_grad_(True)
-        if self.config["mass"]:
-            m_t = mass(batch, mask=~mask, canonical=self.config["canonical"])
-            m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
-        pred_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=mask)
-        pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)
-        if self.wgan:
-            # gradient_penalty = self.compute_gradient_penalty(self.dis_net, batch, fake.detach(), mask, 1)
-            gradient_penalty = self.compute_gradient_penalty2(batch, fake, pred_real, pred_fake)
-            self.log("gradient penalty", gradient_penalty, logger=True)
-            d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1))
-            self.log("d_loss", d_loss, logger=True, prog_bar=True)
-            d_loss += gradient_penalty
-        else:
-            target_real = torch.ones_like(pred_real)
-            target_fake = torch.zeros_like(pred_fake)
-            pred = torch.vstack((pred_real, pred_fake))
-            target = torch.vstack((target_real, target_fake))
-            d_loss = nn.MSELoss()(pred, target).mean()
-            self.log("d_loss", d_loss, logger=True, prog_bar=True)
-        self.dis_net.zero_grad()
-        self.manual_backward(d_loss)
-        if self.global_step > 10:
-            opt_d.step()
-        else:
-            opt_d.zero_grad()
-        if self.global_step == 2:
-            print("passed test disc")
-        return pred_real,pred_fake
-
-    def train_gen(self,batch,mask,opt_g,sched_g=None):
-        self.gen_net.zero_grad()
-        fake = self.sampleandscale(batch, mask, scale=False)
-        m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
-        pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)
-        if self.wgan:
-            g_loss = -torch.mean(pred_fake.view(-1))
-        else:
-            target_real = torch.ones_like(pred_fake)
-            g_loss = nn.MSELoss()((pred_fake.view(-1)), target_real.view(-1))
-        self.manual_backward(g_loss)
-        if self.global_step > 10:
-            opt_g.step()
-        else:
-            opt_g.zero_grad()
-        self.log("g_loss", g_loss, logger=True, prog_bar=True)
-        if self.config["sched"] != None:
-            sched_g.step()
-        if self.global_step == 3:
-            print("passed test gen")
-
 
     def configure_optimizers(self):
         self.losses = []
@@ -434,24 +358,16 @@ class TransGan(pl.LightningModule):
         elif self.config["opt"] == "AdamW":
             opt_g = torch.optim.AdamW(self.gen_net.parameters(), lr=self.config["lr_g"], betas=(0, 0.9))
             opt_d = torch.optim.AdamW(self.dis_net.parameters(), lr=self.config["lr_d"], betas=(0, 0.9))
-        elif self.config["opt"] == "SGD":
-            opt_g = torch.optim.SGD(self.gen_net.parameters(), lr=self.config["lr_g"])
-            opt_d = torch.optim.SGD(self.dis_net.parameters(), lr=self.config["lr_d"])
         else:
             opt_g = torch.optim.RMSprop(self.gen_net.parameters(), lr=self.config["lr_g"])
             opt_d = torch.optim.RMSprop(self.dis_net.parameters(), lr=self.config["lr_d"])
+
         if self.config["sched"] == "cosine":
             lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
             max_iter_d = (self.config["max_epochs"]) * self.num_batches
             max_iter_g = (self.config["max_epochs"] - self.train_nf//2) * self.num_batches // self.freq_d
             lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d)
             lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches // self.freq_d, max_iters=max_iter_g)
-        elif self.config["sched"] == "cosine2":
-            lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
-            max_iter_d = (self.config["max_epochs"]) * self.num_batches 
-            max_iter_g = (self.config["max_epochs"] - self.train_nf//2) * self.num_batches  // self.freq_d
-            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d // 3)
-            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches // self.freq_d, max_iters=max_iter_g // 3)
         else:
             lr_scheduler_nf = None
             lr_scheduler_d = None
@@ -472,53 +388,144 @@ class TransGan(pl.LightningModule):
         mask_test=~mask_test.bool()
         return (mask_test)
 
-    def compute_gradient_penalty(self, D, real_samples, fake_samples, mask, phi):
-        """Calculates the gradient penalty loss for WGAN GP"""
-        # Random weight term for interpolation between real and fake samples
+    def scale(self, x,m): 
+        x = x.reshape(len(x), self.n_part, self.n_dim)
+        # self.data_module.scaler = self.data_module.scaler.to(x.device)
+        for i in range(30):
+            if self.config["quantile"]:
+                x[~m[:,i] ,i, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(x[~m[:,i] ,i, 2].cpu().numpy().reshape(-1,1)).reshape(-1)).to(x.device)
+                x[~m[:,i] ,i, :2] = self.data_module.scalers[i].inverse_transform(x[~m[:,i] ,i, :2].float())
+            else:
+                x[~m[:,i],i,:]= self.data_module.scalers[i].inverse_transform(x[~m[:,i],i,:])
+        return x
 
-        alpha = torch.Tensor(np.random.random((real_samples.size(0), 1, 1))).to(real_samples.device)
-        interpolates = alpha * real_samples + ((1 - alpha) * fake_samples)
-        if self.config["mass"]:
-            m = mass(interpolates, mask=~mask, canonical=self.config["canonical"])
-            d_interpolates = D.train()(interpolates.requires_grad_(True), m.requires_grad_(True), mask=mask)
+    def sampleandscale(self, batch, mask, mask_test=None, scale=False):
+        """This is a helper function that samples from the flow (i.e. generates a new sample)
+        and reverses the standard scaling that is done in the preprocessing. This allows to calculate the mass
+        on the generative sample and to compare to the simulated one, we need to inverse the scaling before calculating the mass
+        because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
+        mask=mask.bool()
+        if mask_test!=None:
+            mask_test=mask_test.bool()
         else:
-            d_interpolates = D.train()(interpolates.requires_grad_(True), mask=mask)
-        fake = torch.ones([real_samples.shape[0], 1], requires_grad=False).to(real_samples.device)
-        # Get gradient w.r.t. interpolates
-        gradients = torch.autograd.grad(
-            outputs=d_interpolates,
-            inputs=interpolates,
-            grad_outputs=fake,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0]
-        gradients = gradients.view(gradients.size(0), -1)
-        gradient_penalty = ((gradients.norm(2, dim=1) - phi) ** 2).mean()
-        return gradient_penalty
+            mask_test=mask
+        with torch.no_grad():
+            z = self.flow.sample(len(batch) if not self.config["context_features"] else 1, context=None if not self.config["context_features"]
+                                else (~mask_test).sum(1).float().reshape(-1,1)).reshape(len(batch), self.n_part, self.n_dim).detach()
+        fake = z + self.gen_net(z, mask=mask_test)  # (1-self.alpha)*
+        fake = fake.reshape(len(batch), self.n_part, self.n_dim)
+        if scale:
+            fake_scaled, z_scaled, true = (self.scale(fake.detach().clone(),mask_test).to(batch.device),
+                                        self.scale(z.detach().clone(),mask_test).to(batch.device), 
+                                        self.scale(batch.detach().clone(),mask).to(batch.device))
+            true = true * (~mask.reshape(len(batch), self.n_part, 1))
+            z_scaled = z_scaled * (~mask_test.reshape(len(batch), self.n_part, 1))
+            fake_scaled = fake_scaled * (~mask_test.reshape(len(batch), self.n_part, 1))
+            return fake.to(batch.device), fake_scaled, true, z_scaled
+        else:
+            return fake
 
-    def compute_gradient_penalty2(self, real_data, fake_data, pred_real, pred_fake, k=2, p=6, device=torch.device("cuda")):
-        real_grad_outputs = torch.full((pred_real.size(0),), 1, dtype=torch.float32, requires_grad=False, device=device)
-        fake_grad_outputs = torch.full((pred_real.size(0),), 1, dtype=torch.float32, requires_grad=False, device=device)
+    def train_wgan(self,  batch,mask,opt_d,sched_d=None):
+        batch = batch.reshape(len(batch), self.n_part, self.n_dim)
+        fake = self.sampleandscale(batch, mask, scale=False)
+        if self.config["mass"]:
+            m_t = mass(batch, mask=~mask, canonical=self.config["canonical"])
+            m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
+        pred_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=mask)
+        pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=mask)
+        gradient_penalty = self.compute_gradient_penalty(batch, fake.detach(),mask)
+        self.log("gradient penalty", gradient_penalty, logger=True)
+        d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1))
+        self.log("d_loss", d_loss, logger=True, prog_bar=True)
+        d_loss += gradient_penalty
+        self.dis_net.zero_grad()
+        self.manual_backward(d_loss)
+        if self.global_step > 1:
+            opt_d.step()
+        if self.global_step == 2:
+            print("passed test disc")
+        if self.current_epoch%10==0 and self.config["mass"]:
+            self.plot_mass(m_t,m_f)
+        return pred_real,pred_fake
 
-        real_gradient = torch.autograd.grad(
-            outputs=pred_real.reshape(-1),
-            inputs=real_data,
-            grad_outputs=real_grad_outputs,
+    def train_disc(self,  batch,mask,opt_d,sched_d=None):  
+        batch = batch.reshape(len(batch), self.n_part, self.n_dim)
+        fake = self.sampleandscale(batch, mask, scale=False)
+        fake = fake.detach()
+        if self.config["mass"]:
+            m_t = mass(batch, mask=~mask, canonical=self.config["canonical"])
+            m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
+        pred_real = self.dis_net(batch.detach(), None if not self.config["mass"] else m_t.detach(), mask=mask)
+        pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=mask)
+        target_real = torch.ones_like(pred_real)
+        target_fake = torch.zeros_like(pred_fake)
+        pred = torch.vstack((pred_real, pred_fake))
+        target = torch.vstack((target_real, target_fake))
+        d_loss = nn.MSELoss()(pred, target).mean()
+        self.log("d_loss", d_loss, logger=True, prog_bar=True)
+        self.dis_net.zero_grad()
+        self.manual_backward(d_loss)
+        if self.global_step > 0:
+            opt_d.step()
+        else:
+            opt_d.zero_grad()
+        if self.current_epoch%10==0 and self.config["mass"]:
+            self.plot_mass(m_t,m_f)
+        return pred_real,pred_fake
+
+    def train_gen(self,batch,mask,opt_g,sched_g=None):
+        fake = self.sampleandscale(batch, mask, scale=False)
+        m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
+        pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)
+        if self.wgan:
+            g_loss = -torch.mean(pred_fake.view(-1))
+        else:
+            target_real = torch.ones_like(pred_fake)
+            g_loss = nn.MSELoss()((pred_fake.view(-1)), target_real.view(-1))
+        self.gen_net.zero_grad()
+        self.manual_backward(g_loss)
+        if self.global_step > 10:
+            opt_g.step()
+        else:
+            opt_g.zero_grad()
+        self.log("g_loss", g_loss, logger=True, prog_bar=True)
+
+        if self.global_step == 3:
+            print("passed test gen")
+        if self.current_epoch%10==0:
+            self.plot_mass(m_f,postfix="2")
+
+    def compute_gradient_penalty(self,real, fake, mask):
+        """Gradient of the critic's scores with respect to mixes of real and fake images.
+        Args:
+        real: a batch of real images
+        fake: a batch of fake images
+        Returns:
+        gradient: the gradient of the critic's scores, with respect to the mixed image
+        """
+        # Mix the images together
+        epsilon = torch.rand(len(real), 1, 1, device=real.device, requires_grad=True)
+        mixed_images = real * epsilon + fake * (1 - epsilon)
+        mixed_mass = mass(mixed_images,mask=mask)
+        # Calculate the critic's scores on the mixed images
+        mixed_scores = self.dis_net(mixed_images, None if not self.config["mass"] else mixed_mass,mask)
+        # Take the gradient of the scores with respect to the images
+        gradient = torch.autograd.grad(
+            # Note: You need to take the gradient of outputs with respect to inputs.
+            #### START CODE HERE ####
+            inputs = mixed_images,
+            outputs = mixed_scores,
+            #### END CODE HERE ####
+            # These other parameters have to do with how the pytorch autograd engine works
+            grad_outputs=torch.ones_like(mixed_scores), 
             create_graph=True,
             retain_graph=True,
         )[0]
-        fake_gradient = torch.autograd.grad(
-            outputs=pred_fake.reshape(-1),
-            inputs=fake_data,
-            grad_outputs=fake_grad_outputs,
-            create_graph=True,
-            retain_graph=True,
-        )[0]
-        real_gradient_norm = real_gradient.view(real_gradient.size(0), -1).pow(2).sum(1) ** (p / 2)
-        fake_gradient_norm = fake_gradient.view(fake_gradient.size(0), -1).pow(2).sum(1) ** (p / 2)
-        gradient_penalty = torch.mean(real_gradient_norm + fake_gradient_norm) * k / 2
-        return gradient_penalty
+        gradient = gradient.view(len(gradient), -1)
+        gradient_norm = gradient.norm(2, dim=1)
+        # Penalize the mean squared distance of the gradient norms from 1
+        gp = torch.mean(torch.square(gradient_norm - 1))
+        return gp
 
     def _summary(self, temp):
         self.summary_path = "/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"], self.config["name"])
@@ -546,14 +553,12 @@ class TransGan(pl.LightningModule):
         opt_nf, opt_d, opt_g = self.optimizers()
         if self.config["sched"]:
             sched_nf, sched_d, sched_g = self.lr_schedulers()
-
         # ### NF PART
         if self.config["sched"] != None:
             self.log("lr_g", sched_g.get_last_lr()[-1], logger=True, on_epoch=True)
             self.log("lr_nf", sched_nf.get_last_lr()[-1], logger=True, on_epoch=True)
             self.log("lr_d", sched_d.get_last_lr()[-1], logger=True, on_epoch=True)
-        # if (self.current_epoch > self.train_nf and self.global_step % self.freq_d < 2) or self.global_step == 2:
-        #
+
         # Only train nf for first few epochs
         if self.current_epoch < self.train_nf:
             if self.config["sched"] != None:
@@ -566,24 +571,20 @@ class TransGan(pl.LightningModule):
             self.log("logprob", nf_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         # GAN PART
-        # if self.current_epoch >= self.train_nf / 2 or self.global_step == 1:
-        if self.current_epoch >=0:
 
+        if self.config["sched"]:
+            sched_d.step()
+        if self.wgan:
+            pred_real,pred_fake=self.train_wgan(batch=batch,mask=mask,opt_d=opt_d,sched_d=sched_d if self.config["sched"] else None )
+        else:
             pred_real,pred_fake=self.train_disc(batch=batch,mask=mask,opt_d=opt_d,sched_d=sched_d if self.config["sched"] else None )
         if (self.current_epoch > self.train_nf//2  and self.global_step % self.freq_d < 2) or self.global_step <= 3:
+            if self.config["sched"]:
+                sched_g.step()
             self.train_gen(batch=batch,mask=mask,opt_g=opt_g,sched_g=sched_g if self.config["sched"] else None )
-
         # Control plot train
         if self.current_epoch % 5 == 0 and self.current_epoch > self.train_nf / 2:
-                fig, ax = plt.subplots()
-                ax.hist(pred_real.detach().cpu().numpy(), label="real", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-                ax.hist(pred_fake.detach().cpu().numpy(), label="fake", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-                ax.hist(pred_real[mask.sum(1)].detach().cpu().numpy(), label="real<30", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-                ax.hist(pred_fake[mask.sum(1)].detach().cpu().numpy(), label="fake<30", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-                ax.legend()
-                plt.ylabel("Counts")
-                plt.xlabel("Critic Score")
-                self.logger.experiment.add_figure("class_train", fig, global_step=self.current_epoch)
+            self.plot_class(pred_real=pred_real,pred_fake=pred_fake,mask=mask)
 
     def validation_step(self, batch, batch_idx):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
@@ -602,10 +603,16 @@ class TransGan(pl.LightningModule):
         self.gen_net = self.gen_net.cpu()
 
         with torch.no_grad():
-            gen, true, z, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch,mask, mask_test, scale=True)
+            gen, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch,mask, mask_test, scale=True)
             if self.config["mass"]:
                 m_t = mass(batch, mask=~mask, canonical=self.config["canonical"])
                 m_f = mass(gen, mask=~mask_test, canonical=self.config["canonical"])
+                fig=plt.figure()
+                _,bins,_=plt.hist(m_t.detach().numpy(),bins=30,label="True")
+                plt.hist(m_f.cpu().detach().numpy(),bins=bins,label="Fake")
+                plt.legend()
+                self.logger.experiment.add_figure("train_mass", fig, global_step=self.current_epoch)
+                plt.close()
         pred_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), None if not self.config["mass"] else m_t, mask=mask)
         pred_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask_test)
         if self.wgan:
@@ -633,13 +640,14 @@ class TransGan(pl.LightningModule):
         # metrics
 
         cov, mmd = cov_mmd(fake_scaled.reshape(-1, self.n_part, self.n_dim), true_scaled.reshape(-1, self.n_part, self.n_dim), use_tqdm=False)
+        nfcov, nfmmd = cov_mmd(z_scaled.reshape(-1, self.n_part, self.n_dim), true_scaled.reshape(-1, self.n_part, self.n_dim), use_tqdm=False)
         try:
             fpndnf = fpnd(z_scaled.reshape(-1, self.n_part, self.n_dim).numpy(), use_tqdm=False, jet_type=self.config["parton"]) 
             fpndv = fpnd(fake_scaled.reshape(-1, self.n_part, self.n_dim).numpy(), use_tqdm=False, jet_type=self.config["parton"])
         except:
             fpndv = 1000
         self.fpnds.append(fpndv)
-        if (np.array(self.fpnds)[-10:] > 30).all() and self.current_epoch > 200:
+        if (np.array(self.fpnds)[-10:] > 5).all() and self.current_epoch > 200:
             print("fpnd to high, stop training")
             raise
         w1m_ = w1m(fake_scaled.reshape(len(batch), self.n_part, self.n_dim), true_scaled.reshape(len(batch), self.n_part, self.n_dim))[0]
@@ -679,7 +687,6 @@ class TransGan(pl.LightningModule):
         self.log("val_cov", cov, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_fpnd", fpndv, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_fpnd_nf", fpndnf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-
         self.log("val_mmd", mmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("g_loss", g_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("d_loss", d_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True)
