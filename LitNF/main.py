@@ -8,8 +8,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import numpy as np
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.loggers import CometLogger, TensorBoardLogger
+from pytorch_lightning.loggers import  TensorBoardLogger
 from pytorch_lightning.tuner.tuning import Tuner
 from scipy import stats
 from torch.nn import functional as FF
@@ -17,7 +16,7 @@ from helpers import *
 from jetnet_dataloader import JetNetDataloader
 from lit_nf import TransGan
 from plotting import plotting
-from pytorch_lightning.profiler import SimpleProfiler
+
 
 # from comet_ml import Experiment
 
@@ -64,11 +63,9 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
     # model.config["lr_g"]=0.00001
     # model.config["lr_d"]=0.00001
     # model.config = config #config are our hyperparams, we make this a class property now
-    logger = TensorBoardLogger(root)
+    logger = TensorBoardLogger(root,version="wgan_"+str(config["wgan"])+"_mass_"+str(config["mass"]))
     # log every n steps could be important as it decides how often it should log to tensorboard
     # Also check val every n epochs, as validation checking takes some time
-
-    profiler = SimpleProfiler()
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
@@ -80,7 +77,6 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
         num_sanity_val_steps=1,  # gradient_clip_val=.02, 
         fast_dev_run=False,
         default_root_dir=root,
-        profiler=profiler
     )
     # This calls the fit function which trains the model
 
@@ -159,7 +155,7 @@ if __name__ == "__main__":
         "num_layers": 4,
         "freq": 6,
         "n_part": 30,
-        "fc": False,
+        "fc": True,
         "hidden": 500,
         "heads": 6,
         "l_dim": 25,
@@ -176,6 +172,7 @@ if __name__ == "__main__":
         "frac_pretrain": 40,
         "seed": 69,
         "quantile": True,
+        "sig": True
     }  #'seed': 744,sched:"None","wgan":False,"freq":8,"sched":None,"heads":4
     config["frac_pretrain"]=config["max_epochs"]//40
     config["l_dim"] = config["l_dim"] * config["heads"]
@@ -197,22 +194,23 @@ if __name__ == "__main__":
             config["sched"] = np.random.choice(["cosine", None])
             config["opt"] = np.random.choice(["Adam", "AdamW"])#True, 
             config["mass"] = np.random.choice([True, False])
-            # config["quantile"] = np.random.choice([True, False])
-            config["wgan"] = np.random.choice([True, False])#
+            config["dropout"] = float(np.random.choice([0.1, 0.3, 0.5]))
+            # config["wgan"] = np.random.choice([True, False])#
             config["batchnorm"] = np.random.choice([True, False])#
 
             config["no_hidden"] = np.random.choice([True, False,])
+            config["quantile"] = np.random.choice([True, False,])
             # config["clf"] = np.random.choice([True, False])
             config["batch_size"] = int(np.random.choice([512, 1024]))
             config["freq"] = np.random.choice([1,3,7])
             config["seed"] = int(np.random.randint(1, 1000))
             config["lr_g"] = stats.loguniform.rvs(0.0001, 0.001, size=1)[0]
             config["lr_nf"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
-            config["heads"] = np.random.randint(4, 8)
-            config["l_dim"] = config["heads"] * np.random.randint(10, 30)
+            config["heads"] = np.random.randint(2, 6)
+            config["l_dim"] = config["heads"] * np.random.randint(10, 15)
 
             # config["hidden"] = 100 * np.random.randint(2, 7)
-            config["num_layers"] = np.random.randint(3, 6)
+            config["num_layers"] = np.random.randint(1, 6)
             config["parton"]=np.random.choice(["t","q","g"])
             # config["parton"] = "q"
             config["norm"] = np.random.choice([True,False])

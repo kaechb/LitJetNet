@@ -76,8 +76,8 @@ class JetNetDataloader(pl.LightningDataModule):
         self.n = masks.sum(axis=1) # number particles per jet
 
         masks=~masks.astype(bool)
-        z = torch.tensor(df.values).reshape(len(df), 30, 3)
-        m = (torch.tensor(masks).reshape(len(df), 30)).bool()
+        z = torch.tensor(df.values[:,:self.n_part*self.n_dim]).reshape(len(df), self.n_part, self.n_dim)
+        m = (torch.tensor(masks[:,:self.n_part]).reshape(len(df), self.n_part)).bool()
 
         self.data = z
 
@@ -86,7 +86,7 @@ class JetNetDataloader(pl.LightningDataModule):
         self.scalers=[]
         self.ptscalers=[]
         self.data=self.data.float()
-        for i in range(30):
+        for i in range(self.n_part):
             self.scalers.append(StandardScaler())
             # self.scaler = 
             if self.config["quantile"]:
@@ -97,7 +97,7 @@ class JetNetDataloader(pl.LightningDataModule):
                 
             else:
                 self.data[~m[:,i],i, :] = self.scalers[i].fit_transform(self.data[~m[:,i],i, :])
-        self.data = self.data.reshape(len(self.data), 90)
+        self.data = self.data.reshape(len(self.data), self.n_part, self.n_dim)
         self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data), self.n_part * self.n_dim), m)))
         self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
 

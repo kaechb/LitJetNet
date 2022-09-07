@@ -26,19 +26,7 @@ from plotting import *
 
 
 class Gen(nn.Module):
-    def __init__(
-        self,
-        n_dim=3,
-        l_dim=10,
-        hidden=300,
-        num_layers=3,
-        num_heads=1,
-        n_part=5,
-        fc=False,
-        dropout=0.5,
-        no_hidden=True,
-        norm=False
-    ):
+    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=5,fc=False,dropout=0.5,no_hidden=True,norm=False):
         super().__init__()
         self.hidden_nodes = hidden
         self.n_dim = n_dim
@@ -46,87 +34,49 @@ class Gen(nn.Module):
         self.n_part = n_part
         self.no_hidden = no_hidden
         self.fc = fc
-        if fc:
-            self.l_dim *= n_part
-            self.embbed_flat = nn.Linear(n_dim * n_part, l_dim)
-            self.flat_hidden = nn.Linear(l_dim, hidden)
-            self.flat_hidden2 = nn.Linear(hidden, hidden)
-            self.flat_hidden3 = nn.Linear(hidden, hidden)
-            self.flat_out = nn.Linear(hidden, n_dim * n_part)
-        else:
-            self.embbed = nn.Linear(n_dim, l_dim)
-            self.encoder = nn.TransformerEncoder(
-                nn.TransformerEncoderLayer(
-                    d_model=l_dim,
-                    nhead=num_heads,
-                    batch_first=True,
-                    norm_first=norm,
-                    dim_feedforward=hidden,
-                    dropout=dropout,
-                ),
-                num_layers=num_layers,
-            )
-            self.hidden = nn.Linear(l_dim, hidden)
-            self.hidden2 = nn.Linear(hidden, hidden)
-            self.hidden3 = nn.Linear(hidden, hidden)
-            self.dropout = nn.Dropout(dropout / 2)
-            self.out = nn.Linear(hidden, n_dim)
-            self.out2 = nn.Linear(l_dim, n_dim)
-
-            self.out_flat = nn.Linear(hidden, n_dim * n_part)
+        self.embbed = nn.Linear(n_dim, l_dim)
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=l_dim, nhead=num_heads, batch_first=True, norm_first=norm, dim_feedforward=hidden, dropout=dropout),
+            num_layers=num_layers,
+        )
+        self.hidden = nn.Linear(l_dim, hidden)
+        self.hidden2 = nn.Linear(hidden, hidden)
+        self.hidden3 = nn.Linear(hidden, hidden)
+        self.dropout = nn.Dropout(dropout / 2)
+        self.out = nn.Linear(hidden, n_dim)
+        self.out2 = nn.Linear(l_dim, n_dim)
+        self.out_flat = nn.Linear(hidden, n_dim * n_part)
 
     def forward(self, x, mask=None):
+        x = self.embbed(x)
+        x = self.encoder(x, src_key_padding_mask=mask)
+        if not self.no_hidden == True:
+            x = leaky_relu(self.hidden(x))
+            x = self.dropout(x)
+            x = leaky_relu(self.hidden2(x))
+            x = self.dropout(x)
+            x = self.out(x)
+        elif self.no_hidden == "more":
+            x = leaky_relu(self.hidden(x))
+            x = self.dropout(x)
+            x = leaky_relu(self.hidden2(x))
+            x = self.dropout(x)
+            x = leaky_relu(self.hidden3(x))
+            x = self.dropout(x)
 
-        if self.fc:
-            x = x.reshape(len(x), self.n_part * self.n_dim)
-            x = self.embbed_flat(x)
-            x = leaky_relu(self.flat_hidden(x))
-            #             x = self.dropout(x)
-            x = self.flat_out(x)
-            x = x.reshape(len(x), self.n_part, self.n_dim)
         else:
-            x = self.embbed(x)
-            x = self.encoder(x, src_key_padding_mask=mask)
-            if not self.no_hidden == True:
-
-                x = leaky_relu(self.hidden(x))
-                x = self.dropout(x)
-                x = leaky_relu(self.hidden2(x))
-                x = self.dropout(x)
-                x = self.out(x)
-            elif self.no_hidden == "more":
-                x = leaky_relu(self.hidden(x))
-                x = self.dropout(x)
-                x = leaky_relu(self.hidden2(x))
-                x = self.dropout(x)
-                x = leaky_relu(self.hidden3(x))
-                x = self.dropout(x)
-
-            else:
-                x = leaky_relu(x)
-                x = self.out2(x)
+            x = leaky_relu(x)
+            x = self.out2(x)
         return x
 
 
 class Disc(nn.Module):
     def __init__(
-        self,
-        n_dim=3,
-        l_dim=10,
-        hidden=300,
-        num_layers=3,
-        num_heads=1,
-        n_part=2,
-        fc=False,
-        dropout=0.5,
-        mass=False,
-        clf=False,
-        norm=False
-    ):
+        self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=2,fc=False,dropout=0.5,mass=False,clf=False,norm=False):
         super().__init__()
         self.hidden_nodes = hidden
         self.n_dim = n_dim
-        #         l_dim=n_dim
         self.l_dim = l_dim
         self.n_part = n_part
         self.fc = fc
@@ -138,8 +88,9 @@ class Disc(nn.Module):
             self.flat_hidden = nn.Linear(l_dim, hidden)
             self.flat_hidden2 = nn.Linear(hidden, hidden)
             self.flat_hidden3 = nn.Linear(hidden, hidden)
-            self.flat_out = nn.Linear(hidden, 1)
+            self.out = nn.Linear(hidden, 1)
         else:
+            self.mass=int(mass)
             self.embbed = nn.Linear(n_dim, l_dim)
             self.encoder = nn.TransformerEncoder(
                 nn.TransformerEncoderLayer(
@@ -153,10 +104,10 @@ class Disc(nn.Module):
                 ),
                 num_layers=num_layers,
             )
-            self.hidden = nn.Linear(l_dim + int(mass), 2 * hidden)
-            self.hidden2 = nn.Linear(2 * hidden, hidden)
+            self.hidden = nn.Linear(l_dim + int(mass),  hidden)
+            self.hidden2 = nn.Linear( hidden, hidden)
             self.out = nn.Linear(hidden, 1)
-
+        
     def forward(self, x, m=None, mask=None):
 
         if self.fc == True:
@@ -164,13 +115,12 @@ class Disc(nn.Module):
             x = self.embbed_flat(x)
             x = leaky_relu(self.flat_hidden(x), 0.2)
             x = leaky_relu(self.flat_hidden2(x), 0.2)
-            x = self.flat_out(x)
+        #     x = self.flat_out(x)
         else:
             x = self.embbed(x)
             if self.clf:
                 x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
                 mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device)
-
                 x = self.encoder(x, src_key_padding_mask=mask)
                 x = x[:, 0, :]
             else:
@@ -178,10 +128,9 @@ class Disc(nn.Module):
                 x = torch.sum(x, axis=1)
             if m is not None:
                 x = torch.concat((m.reshape(len(x), 1), x), axis=1)
-            x = leaky_relu(self.hidden(x), 0.2)
-            x = leaky_relu(self.hidden2(x), 0.2)
-            x = self.out(x)
-            x = x
+            x = leaky_relu(self.hidden(x), 0.2)+torch.cat((x,torch.zeros((len(x),self.hidden_nodes-self.l_dim-int(self.mass)),device=x.device)),axis=1)
+            x = leaky_relu(self.hidden2(x), 0.2)+x
+        x = self.out(x)
         return x
 
 
@@ -275,7 +224,7 @@ class TransGan(pl.LightningModule):
         for p in self.gen_net.parameters():
             if p.dim() > 1:
                 nn.init.xavier_normal_(p)
-        self.gen_net.out.weight.data.uniform_(-0.01,0.01)
+        self.gen_net.out.weight.data.uniform_(0)
         self.gen_net.out.bias.data.fill_(0)
         self.gen_net.out2.weight.data.uniform_(-0.01,0.01)
         self.gen_net.out2.bias.data.fill_(0)
@@ -296,7 +245,6 @@ class TransGan(pl.LightningModule):
         plt.legend()
         plt.ylabel("Counts")
         plt.xlabel("Critic Score")
-        plt.yscale("log")
         self.logger.experiment.add_figure("train_mass"+postfix, fig, global_step=self.current_epoch)
         plt.close()
     
@@ -412,7 +360,7 @@ class TransGan(pl.LightningModule):
         with torch.no_grad():
             z = self.flow.sample(len(batch) if not self.config["context_features"] else 1, context=None if not self.config["context_features"]
                                 else (~mask_test).sum(1).float().reshape(-1,1)).reshape(len(batch), self.n_part, self.n_dim).detach()
-        fake = z + self.gen_net(z, mask=mask_test)  # (1-self.alpha)*
+        fake = z.detach() + self.gen_net(z.detach(), mask=mask_test)  # (1-self.alpha)*
         fake = fake.reshape(len(batch), self.n_part, self.n_dim)
         if scale:
             fake_scaled, z_scaled, true = (self.scale(fake.detach().clone(),mask_test).to(batch.device),
@@ -431,8 +379,8 @@ class TransGan(pl.LightningModule):
         if self.config["mass"]:
             m_t = mass(batch, mask=~mask, canonical=self.config["canonical"])
             m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
-        pred_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=mask)
-        pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=mask)
+        pred_real = self.dis_net(batch, m=None if not self.config["mass"] else m_t, mask=mask)
+        pred_fake = self.dis_net(fake.detach(),m= None if not self.config["mass"] else m_f.detach(), mask=mask)
         gradient_penalty = self.compute_gradient_penalty(batch, fake.detach(),mask)
         self.log("gradient penalty", gradient_penalty, logger=True)
         d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1))
@@ -455,12 +403,14 @@ class TransGan(pl.LightningModule):
         if self.config["mass"]:
             m_t = mass(batch, mask=~mask, canonical=self.config["canonical"])
             m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
-        pred_real = self.dis_net(batch.detach(), None if not self.config["mass"] else m_t.detach(), mask=mask)
-        pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=mask)
+        pred_real = self.dis_net(batch.detach(), m=None if not self.config["mass"] else m_t.detach(), mask=mask)
+        pred_fake = self.dis_net(fake.detach(), m=None if not self.config["mass"] else m_f.detach(), mask=mask)
         target_real = torch.ones_like(pred_real)
         target_fake = torch.zeros_like(pred_fake)
         pred = torch.vstack((pred_real, pred_fake))
         target = torch.vstack((target_real, target_fake))
+        if self.config["sig"]:
+            pred=self.sig(pred)
         d_loss = nn.MSELoss()(pred, target).mean()
         self.log("d_loss", d_loss, logger=True, prog_bar=True)
         self.dis_net.zero_grad()
@@ -477,6 +427,8 @@ class TransGan(pl.LightningModule):
         fake = self.sampleandscale(batch, mask, scale=False)
         m_f = mass(fake, mask=~mask, canonical=self.config["canonical"])
         pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)
+        if self.config["sig"]:
+            pred_fake=self.sig(pred_fake)
         if self.wgan:
             g_loss = -torch.mean(pred_fake.view(-1))
         else:
@@ -506,9 +458,9 @@ class TransGan(pl.LightningModule):
         # Mix the images together
         epsilon = torch.rand(len(real), 1, 1, device=real.device, requires_grad=True)
         mixed_images = real * epsilon + fake * (1 - epsilon)
-        mixed_mass = mass(mixed_images,mask=mask)
+        mixed_mass = mass(mixed_images)
         # Calculate the critic's scores on the mixed images
-        mixed_scores = self.dis_net(mixed_images, None if not self.config["mass"] else mixed_mass,mask)
+        mixed_scores = self.dis_net(mixed_images,m= None if not self.config["mass"] else mixed_mass)
         # Take the gradient of the scores with respect to the images
         gradient = torch.autograd.grad(
             # Note: You need to take the gradient of outputs with respect to inputs.
@@ -591,7 +543,6 @@ class TransGan(pl.LightningModule):
 
         mask = batch[:, 90:].cpu().bool()
         mask_test = self.sample_n(mask).bool()
-
         batch = batch[:, :90].cpu()
         self.dis_net.train()
         self.gen_net.train()
@@ -613,8 +564,8 @@ class TransGan(pl.LightningModule):
                 plt.legend()
                 self.logger.experiment.add_figure("train_mass", fig, global_step=self.current_epoch)
                 plt.close()
-        pred_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), None if not self.config["mass"] else m_t, mask=mask)
-        pred_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask_test)
+        pred_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), m=None if not self.config["mass"] else m_t, mask=mask)
+        pred_fake = self.dis_net(gen, m=None if not self.config["mass"] else m_f, mask=mask_test)
         if self.wgan:
             d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1))
             g_loss = -torch.mean(pred_fake.view(-1))
@@ -627,23 +578,28 @@ class TransGan(pl.LightningModule):
             g_loss = nn.MSELoss()((pred_fake.view(-1)), target_real.view(-1))
         true_scaled=true_scaled.reshape(-1,30,3)*(~mask).reshape(-1,30,1)
         fake_scaled=fake_scaled.reshape(-1,30,3)*(~mask_test).reshape(-1,30,1)
+        z_scaled=(z_scaled.reshape(-1,30,3)*(~mask_test).reshape(-1,30,1)).reshape(-1,90)
         true_scaled, fake_scaled, z_scaled = (true_scaled.reshape(-1, 90), fake_scaled.reshape(-1, 90), z_scaled.reshape(-1, 90))
         # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
         m_t = mass(true_scaled, canonical=self.config["canonical"], mask=~mask).cpu()
         m_gen = mass(z_scaled, mask=~mask_test, canonical=self.config["canonical"]).cpu()
         m_c = mass(fake_scaled, mask=~mask_test, canonical=self.config["canonical"]).cpu()
+        fake_scaled=fake_scaled.reshape(-1,self.n_part,self.n_dim)
+        true_scaled=true_scaled.reshape(-1,self.n_part,self.n_dim)
+        z_scaled=z_scaled.reshape(-1,self.n_part,self.n_dim)
+
         for i in range(30):
-            i = 2 + 3 * i
             # gen[gen[:,i]<0,i]=0
-            fake_scaled[fake_scaled[:, i] < 0, i] = 0
-            true_scaled[true_scaled[:, i] < 0, i] = 0
+            z_scaled[z_scaled[:, i,2] < 0,i, 2] = 0
+            fake_scaled[fake_scaled[:, i,2] < 0,i, 2] = 0
+            true_scaled[true_scaled[:, i,2] < 0,i, 2] = 0
         # metrics
 
-        cov, mmd = cov_mmd(fake_scaled.reshape(-1, self.n_part, self.n_dim), true_scaled.reshape(-1, self.n_part, self.n_dim), use_tqdm=False)
-        nfcov, nfmmd = cov_mmd(z_scaled.reshape(-1, self.n_part, self.n_dim), true_scaled.reshape(-1, self.n_part, self.n_dim), use_tqdm=False)
+        cov, mmd = cov_mmd(fake_scaled, true_scaled, use_tqdm=False)
+        nfcov, nfmmd = cov_mmd(z_scaled, true_scaled, use_tqdm=False)
         try:
-            fpndnf = fpnd(z_scaled.reshape(-1, self.n_part, self.n_dim).numpy(), use_tqdm=False, jet_type=self.config["parton"]) 
-            fpndv = fpnd(fake_scaled.reshape(-1, self.n_part, self.n_dim).numpy(), use_tqdm=False, jet_type=self.config["parton"])
+            fpndnf = fpnd(z_scaled.numpy(), use_tqdm=False, jet_type=self.config["parton"]) 
+            fpndv = fpnd(fake_scaled.numpy(), use_tqdm=False, jet_type=self.config["parton"])
         except:
             fpndv = 1000
         self.fpnds.append(fpndv)
@@ -659,6 +615,7 @@ class TransGan(pl.LightningModule):
             "val_fpnd_nf": fpndnf,
             "val_mmd": mmd,
             "val_cov": cov,
+            "val_nfcov": nfcov,
             "val_w1m": w1m_,
             "val_w1efp": w1efp_,
             "val_w1p": w1p_,
@@ -669,11 +626,11 @@ class TransGan(pl.LightningModule):
         print("epoch {}: ".format(self.current_epoch), temp)
         if self.hyperopt and self.global_step > 3:
 
-            if self.current_epoch < self.train_nf:
-                with torch.no_grad():
-                    logprob = -self.flow.log_prob(batch,context=(~mask).sum(1).reshape(-1,1).float() if self.config["context_features"] else None).mean() / 90
-                self.log("val_logprob", logprob, prog_bar=True, logger=True)
-                temp["val_logprob"] = float(logprob.numpy())
+            # if self.current_epoch < self.train_nf:
+            with torch.no_grad():
+                logprob = -self.flow.log_prob(batch,context=(~mask).sum(1).reshape(-1,1).float() if self.config["context_features"] else None).mean() / 90
+            self.log("val_logprob", logprob, prog_bar=True, logger=True)
+            temp["val_logprob"] = float(logprob.numpy())
             try:
                 self._results(temp)
             except:
@@ -685,12 +642,14 @@ class TransGan(pl.LightningModule):
         self.log("val_w1p", w1p_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1efp", w1efp_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_cov", cov, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        self.log("val_nfcov", nfcov, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        self.log("val_nfmmd", nfmmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_fpnd", fpndv, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_fpnd_nf", fpndnf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_mmd", mmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("g_loss", g_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("d_loss", d_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-
+        true_scaled, fake_scaled, z_scaled = (true_scaled.reshape(-1, 90), fake_scaled.reshape(-1, 90), z_scaled.reshape(-1, 90))
         self.plot = plotting(
             model=self, gen=z_scaled, gen_corr=fake_scaled, true=true_scaled, config=self.config, step=self.global_step, logger=self.logger.experiment
         )
