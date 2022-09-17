@@ -8,13 +8,13 @@ import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import QuantileTransformer
-from helpers import mass
+from helpers import *
 
 
 class StandardScaler:
     def __init__(self, mean=None, std=None, epsilon=1e-7):
         """Standard Scaler.
-        The class can be used to normalize PyTorch Tensors using native
+        The class can be used to normalize PyTorch Tensors using native 
         functions. The module does not expect the tensors to be of any specific shape;
          as long as the features are the last dimension in the tensor, the module
         will work fine.
@@ -67,39 +67,47 @@ class JetNetDataloader(pl.LightningDataModule):
     def setup(self, stage):
         # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        data_dir = os.environ["HOME"] + "/JetNet_NF/train_{}_jets.csv".format(self.config["parton"])
+        data_dir = os.environ["HOME"] + "/JetNet_NF/train_{}_jets.csv".format(
+            self.config["parton"]
+        )
         data = pd.read_csv(data_dir, sep=" ", header=None)
+        df = pd.DataFrame()
         limit = int(self.config["limit"] * 1.1)
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
-        masks = data.values[:, np.arange(3, 120, 4)][:limit] # zero padded particles are masked and given as feature
-        df = data.drop(np.arange(3, 120, 4), axis=1)[:limit]
-        self.n = masks.sum(axis=1) # number particles per jet
+        masks = data.values[:, np.arange(3, 120, 4)][:limit]
+        self.n = masks.sum(axis=1)
 
-        masks=~masks.astype(bool)
-        z = torch.tensor(df.values[:,:self.n_part*self.n_dim]).reshape(len(df), self.n_part, self.n_dim)
-        m = (torch.tensor(masks[:,:self.n_part]).reshape(len(df), self.n_part)).bool()
+        df = data.drop(np.arange(3, 120, 4), axis=1)[: limit]
+
+        # stacking together differnet samples with different number particles per jet
+
+        # calculating mass per jet
+        #         self.m=mass(self.data[:,:self.n_dim]).reshape(-1,1)
+        # Adding noise to zero padded jets.
+
+        z = torch.tensor(df.values).reshape(len(df), 30, 3)
+        m = (torch.tensor(masks).reshape(len(df), 30)).bool()
 
         self.data = z
-
-        self.data[m, :] = torch.normal(mean=torch.zeros_like(self.data[m, :]), std=1).abs() * 1e-7
+        self.data[~m, :] = (
+            torch.normal(mean=torch.zeros_like(self.data[~m, :]), std=1).abs() * 1e-7
+        )
         # standard scaling
-        self.scalers=[]
-        self.ptscalers=[]
-        self.data=self.data.float()
-        for i in range(self.n_part):
-            self.scalers.append(StandardScaler())
-            # self.scaler = 
-            if self.config["quantile"]:
-                self.ptscalers.append( QuantileTransformer(output_distribution="normal"))
-                self.data[~m[:,i],i,:2] = self.scalers[i].fit_transform(self.data[~m[:,i],i, :2])
-                self.data[~m[:,i],i, 2] = torch.tensor(self.ptscalers[i].fit_transform(self.data[~m[:,i],i, 2].reshape(-1,1).numpy())).reshape(-1)
-                self.min_pt = self.data[~m[:,i],i, :2].min(axis=0)[0]
-                
-            else:
-                self.data[~m[:,i],i, :] = self.scalers[i].fit_transform(self.data[~m[:,i],i, :])
-        self.data = self.data.reshape(len(self.data), self.n_part, self.n_dim)
-        self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data), self.n_part * self.n_dim), m)))
+        self.scaler = StandardScaler()
+        if self.config["quantile"]:
+            self.ptscaler = QuantileTransformer(output_distribution="uniform")
+
+            self.data[:, :, :2] = self.scaler.fit_transform(self.data[:, :, :2])
+            self.data[:, :, 2] = torch.tensor(
+                self.ptscaler.fit_transform(self.data[:, :, 2].numpy())
+            )
+            self.min_pt = self.data[:, :, 2].min(axis=0)[0]
+            self.data = self.data.reshape(len(self.data), 90)
+        else:
+            self.data=self.scaler.fit_transform(self.data)
+        self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data),self.n_part*self.n_dim), m)))
         self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
+
 
         self.test_set = torch.tensor(self.test_set).float()
         self.data = torch.tensor(self.data).float()

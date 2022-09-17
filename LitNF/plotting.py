@@ -74,7 +74,31 @@ import time
 
 print("good boy")
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
+def mass(data, canonical=False):
+    if canonical:
+        n_dim = data.shape[1]
+        p = data.reshape(-1, n_dim // 3, 3)
+        px = p[:, :, 0]
+        py = p[:, :, 1]
+        pz = p[:, :, 2]
 
+    else:
+        n_dim = data.shape[1]
+        p = data.reshape(-1, n_dim // 3, 3)
+        px = torch.cos(p[:, :, 1]) * p[:, :, 2]
+        py = torch.sin(p[:, :, 1]) * p[:, :, 2]
+        pz = torch.sinh(p[:, :, 0]) * p[:, :, 2]
+    px = torch.clamp(px, min=-100, max=100)
+    py = torch.clamp(py, min=-100, max=100)
+    pz = torch.clamp(pz, min=-100, max=100)
+    E = torch.sqrt(px**2 + py**2 + pz**2)
+    E = E.sum(axis=1) ** 2
+    p = px.sum(axis=1) ** 2 + py.sum(axis=1) ** 2 + pz.sum(axis=1) ** 2
+    m2 = E - p
+    # if m2.isnan().any():
+    #     print("px:{} py:{} pz:{} ".format(px.abs().max(),py.abs().max(),pz.abs().max()))
+    # assert m2.isnan().sum()==0
+    return torch.sqrt(torch.max(m2, torch.zeros(len(E)).to(E.device)))
 
 
 font = {"family": "normal", "weight": "bold", "size": 12}
@@ -287,14 +311,3 @@ class plotting:
         #             self.summary.close()
         else:
             plt.show()
-    def plot_class(self,pred_real,pred_fake,bins=50,step=0):
-        
-        fig = plt.figure()
-        _, bins, _ = plt.hist(pred_real.numpy(), bins=bins, label="MC simulated", alpha=1,histtype="step")
-        plt.hist(pred_fake.numpy(), bins=bins, label="ML generated", alpha=1,histtype="step")
-        plt.xlabel("Critic Score")
-        plt.ylabel("Counts")
-        plt.legend()
-        self.summary.add_figure("class_val", fig, global_step=step)
-        plt.close()
-

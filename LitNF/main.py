@@ -8,7 +8,8 @@ import pandas as pd
 import pytorch_lightning as pl
 import numpy as np
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import  TensorBoardLogger
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import CometLogger, TensorBoardLogger
 from pytorch_lightning.tuner.tuning import Tuner
 from scipy import stats
 from torch.nn import functional as FF
@@ -17,12 +18,10 @@ from jetnet_dataloader import JetNetDataloader
 from lit_nf import TransGan
 from plotting import plotting
 
-
 # from comet_ml import Experiment
 
 
 def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
-
     # This function is a wrapper for the hyperparameter optimization module called ray
     # Its parameters hyperopt and load_ckpt are there for convenience
     # Config is the only relevant parameter as it sets the trainings hyperparameters
@@ -39,16 +38,9 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
         ModelCheckpoint(
             monitor="val_w1m",
             save_top_k=2,
-            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}-{val_w1efp:.6f}",
-            dirpath=None,
-            every_n_epochs=config["val_check"],
-        ),
-        ModelCheckpoint(
-            monitor="val_fpnd",
-            save_top_k=2,
-            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}-{val_w1efp:.6f}",
-            dirpath=None,
-            every_n_epochs=config["val_check"],
+            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}",
+            dirpath=root,
+            every_n_epochs=10,
         )
     ]
 
@@ -63,9 +55,11 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
     # model.config["lr_g"]=0.00001
     # model.config["lr_d"]=0.00001
     # model.config = config #config are our hyperparams, we make this a class property now
-    logger = TensorBoardLogger(root,version="wgan_"+str(config["wgan"])+"_mass_"+str(config["mass"]))
+    print(root)
+    logger = TensorBoardLogger(root)
     # log every n steps could be important as it decides how often it should log to tensorboard
     # Also check val every n epochs, as validation checking takes some time
+
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
@@ -85,7 +79,7 @@ def train(config, hyperopt=False, load_ckpt=None, i=0, root=None):
 
 if __name__ == "__main__":
 
-    hyperopt = True  # This sets to run a hyperparameter optimization with ray or just running the training once
+    hyperopt = False  # This sets to run a hyperparameter optimization with ray or just running the training once
 
     # config = {
     #     "autoreg": False,
@@ -131,15 +125,34 @@ if __name__ == "__main__":
     #     "val_check": 50,
     #     "frac_pretrain": 80,
     # }
-
+    cols = [
+        "name",
+        "parton",
+        "mass",
+        "sched",
+        "opt",
+        "no_hidden",
+        "clf",
+        "batch_size",
+        "freq",
+        "seed",
+        "lr_g",
+        "heads",
+        "hidden",
+        "l_dim",
+        "num_layers",
+        "val_check",
+    ]
     config = {
-        "context_features": 1,
+        "autoreg": False,
+        "context_features": 0,
+        "network_layers": 3,
         "network_layers_nf": 2,
         "network_nodes_nf": 256,
-        "batch_size": 1024,#1024 best
+        "batch_size": 1024,
         "coupling_layers": 15,
         "lr": 0.001,
-        "batchnorm": True,
+        "batchnorm": False,
         "bins": 5,
         "tail_bound": 6,
         "limit": 200000,
@@ -148,14 +161,16 @@ if __name__ == "__main__":
         "canonical": False,
         "max_steps": 100000,
         "lambda": 100,
-        "name": "Transflow_final",
+        "name": "Transflow_best",
         "disc": False,
-        "parton": "q",
-        "wgan": False,
+        "variable": 1,
+        "parton": "t",
+        "wgan": True,
+        "corr": True,
         "num_layers": 4,
         "freq": 6,
         "n_part": 30,
-        "fc": True,
+        "fc": False,
         "hidden": 500,
         "heads": 6,
         "l_dim": 25,
@@ -168,76 +183,61 @@ if __name__ == "__main__":
         "mass": True,
         "no_hidden": False,
         "clf": True,
-        "val_check": 25,
-        "frac_pretrain": 40,
+        "val_check": 50,
+        "frac_pretrain": 80,
         "seed": 69,
-        "quantile": True,
-        "sig": True
+        "quantile": False,
     }  #'seed': 744,sched:"None","wgan":False,"freq":8,"sched":None,"heads":4
-    config["frac_pretrain"]=config["max_epochs"]//40
+    config={'autoreg': False, 'context_features': 0, 'network_layers': 3, 'network_layers_nf': 2, 'network_nodes_nf': 256, 'batch_size': 1024, 'coupling_layers': 15, 'lr': 0.001, 'batchnorm': False, 'bins': 5, 'tail_bound': 6, 'limit': 150000, 'n_dim': 3, 'dropout': 0.2, 'canonical': False, 'max_steps': 100000, 'lambda': 1, 'name': 'Transflow_best', 'disc': False, 'variable': 1, 'parton': 't', 'wgan': False, 'corr': True, 'num_layers': 4, 'freq': 6, 'n_part': 30, 'fc': False, 'hidden': 500, 'heads': 4, 'l_dim': 25, 'lr_g': 0.0004327405312571664, 'lr_d': 0.0004327405312571664, 'lr_nf': 0.000722, 'sched': "cosine2", 'opt': 'RMSprop', 'max_epochs': 3200, 'mass': True, 'no_hidden': False, 'clf': True, 'val_check': 50, 'frac_pretrain': 80,"seed":69,"quantile": False, }#'seed':
     config["l_dim"] = config["l_dim"] * config["heads"]
 
     print(config["name"])
+
+    if len(sys.argv) > 2:
+        root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/"+config["parton"]+"_" +"run"+sys.argv[1]+"_"+str(sys.argv[2])
+    else:
+        root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+ config["name"]
     if not hyperopt:
         hyperopt = True
-        # for col in cols:
-        #     print('"' + col + '":' + str(config[col]))
-        print("NOT HYPEROPT")
-        root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["parton"]+"_" + config["name"]
+        for col in cols:
+            print('"' + col + '":' + str(config[col]))
+
         train(config, hyperopt=hyperopt, root=root)
     else:
-
+        # if not os.path.isfile("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"])):
+        #     pd.DataFrame().to_csv("/beegfs/desy/user/{}/ray_results/{}/summary.csv".format(os.environ["USER"],config["parton"]))
         num_samples = 1  # how many hparam settings to sample with ray
-        resources = {"cpu": 10, "gpu": 0.5}       
+        resources = {"cpu": 10, "gpu": 0.5}
+        # This sets the logging in ray
+        # reporter = CLIReporter(max_progress_rows=40, max_report_frequency=300, sort_by_metric=True,
+        #                        metric="logprob", parameter_columns=["network_nodes", "network_layers", "coupling_layers", "lr"])
         for i in range(num_samples):
-            
-            config["sched"] = np.random.choice(["cosine", None])
-            config["opt"] = np.random.choice(["Adam", "AdamW"])#True, 
-            config["mass"] = np.random.choice([True, False])
-            config["dropout"] = float(np.random.choice([0.1, 0.3, 0.5]))
-            # config["wgan"] = np.random.choice([True, False])#
-            config["batchnorm"] = np.random.choice([True, False])#
 
-            config["no_hidden"] = np.random.choice([True, False,])
-            config["quantile"] = np.random.choice([True, False,])
-            # config["clf"] = np.random.choice([True, False])
-            config["batch_size"] = int(np.random.choice([512, 1024]))
-            config["freq"] = np.random.choice([1,3,7])
+            temproot = root
+
+            config["sched"] = np.random.choice(["cosine", "cosine2", None])
+            #config["opt"] = np.random.choice(["Adam", "RMSprop"])
+            #config["mass"] = np.random.choice([True, False])
+            config["quantile"] = np.random.choice([True, False])
+            config["no_hidden"] = np.random.choice([True, False,"more"])
+            config["clf"] = np.random.choice([True, False])
+            # config["batch_size"] = 2 ** np.random.randint(8, 12)
+            config["freq"] = np.random.randint(5, 10)
             config["seed"] = int(np.random.randint(1, 1000))
-            config["lr_g"] = stats.loguniform.rvs(0.0001, 0.001, size=1)[0]
-            config["lr_nf"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
-            config["heads"] = np.random.randint(2, 6)
-            config["l_dim"] = config["heads"] * np.random.randint(10, 15)
-
-            # config["hidden"] = 100 * np.random.randint(2, 7)
-            config["num_layers"] = np.random.randint(1, 6)
-            config["parton"]=np.random.choice(["t","q","g"])
-            # config["parton"] = "q"
-            config["norm"] = np.random.choice([True,False])
-            config["name"] = config["name"] + "_" + config["parton"]
-            print(config["parton"])
             
-            if len(sys.argv) > 2:
-                root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/run"+sys.argv[1]+"_"+str(sys.argv[2])
-                print(root)
-            else:
-                root = "/beegfs/desy/user/" + os.environ["USER"] + "/"+config["name"]
-            print(config)
-            # for col in cols:
-            #     print('"' + col + '":' + str(config[col]))
-            if config["parton"]=="q":
-                config["network_layers_nf"]=2
-                config["network_nodes_nf"]=256
-                config["tail_bound"]=6
-                config["lr_nf"]=0.00047352
-                config["quantile"]=True
-            if config["parton"]=="t":
-                config["network_layers_nf"]=2
-                config["network_nodes_nf"]=128
-                config["tail_bound"]=6
-                config["lr_nf"]=0.00067486
+            # config["lr_g"] = stats.loguniform.rvs(0.00001, 0.001, size=1)[0]
+            
+            
+            config["heads"] = np.random.randint(3, 6)
+            config["l_dim"] = config["heads"] * 25
+            # config["hidden"] = 100 * np.random.randint(2, 7)
+            config["num_layers"] = np.random.randint(3, 6)
+
+            for col in cols:
+                print('"' + col + '":' + str(config[col]))
+
             try:
-                train(config, hyperopt=hyperopt, i=i, root=root)
+                train(config, hyperopt=hyperopt, i=i, root=temproot)
             except:
                 print("error")
                 traceback.print_exc()
