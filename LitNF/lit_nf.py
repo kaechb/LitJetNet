@@ -283,6 +283,7 @@ class TransGan(pl.LightningModule):
                 if not valid_gradients:
                     break
         if not valid_gradients:
+            print("not valid grads", self.counter)
             self.zero_grad()
             self.counter += 1
             if self.counter > 5:
@@ -312,41 +313,6 @@ class TransGan(pl.LightningModule):
         # Construct flow model
         self.flow = base.Flow(distribution=self.q0, transform=self.flows)
 
-    def plot_mass(self,m_f,m_t=None,postfix=""):
-        fig=plt.figure()
-        if not m_t==None:
-            _,bins,_=plt.hist(m_t.cpu().detach().numpy(),bins=30,label="True",histtype="step")
-            plt.hist(m_f.cpu().detach().numpy(),bins=bins,label="Fake",histtype="step")
-        else:
-            plt.hist(m_f[m_f<500].cpu().detach().numpy(),bins=30,label="True",histtype="step")
-        plt.legend()
-        plt.ylabel("Counts")
-        plt.xlabel("Critic Score")
-        self.logger.experiment.add_figure("train_mass"+postfix, fig, global_step=self.current_epoch)
-        plt.close()
-    
-    def plot_class(self,pred_real,pred_fake,mask):
-        fig, ax = plt.subplots()
-        ax.hist(pred_real.detach().cpu().numpy(), label="real", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-        ax.hist(pred_fake.detach().cpu().numpy(), label="fake", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-        ax.hist(pred_real[mask.sum(1)].detach().cpu().numpy(), label="real<30", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-        ax.hist(pred_fake[mask.sum(1)].detach().cpu().numpy(), label="fake<30", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
-        ax.legend()
-        plt.ylabel("Counts")
-        plt.xlabel("Critic Score")
-        self.logger.experiment.add_figure("class_train", fig, global_step=self.current_epoch)
-        plt.close()
-
-    def sample_n(self, mask):
-        #Samples a mask where the zero padded particles are True, rest False
-        mask_test = torch.ones_like(mask)
-        n, counts = np.unique(self.data_module.n, return_counts=True)
-        counts_prob = torch.tensor(counts / len(self.data_module.n) )
-        n_test=n[torch.multinomial(counts_prob,replacement=True,num_samples=(len(mask)))] 
-        indices = torch.arange(30, device=mask.device)
-        mask_test = (indices.view(1, -1) < torch.tensor(n_test).view(-1, 1))      
-        mask_test=~mask_test.bool()
-        return (mask_test)
     def sampleandscale(self, batch, mask=None, scale=False):
         """This is a helper function that samples from the flow (i.e. generates a new sample)
         and reverses the standard scaling that is done in the preprocessing. This allows to calculate the mass
@@ -355,11 +321,13 @@ class TransGan(pl.LightningModule):
         with torch.no_grad():
 
             z = self.flow.sample(len(batch)).reshape(len(batch), self.n_part, self.n_dim)
-
+        if self.add_corr:
             fake = z + self.gen_net(z, mask=mask)  # (1-self.alpha)*
-        fake = fake.reshape(len(batch), self.n_part, self.n_dim)
-        if not mask==None:
-            fake = fake*(~mask.bool()).reshape(len(mask),30,1)
+            fake = fake.reshape(len(batch), self.n_part, self.n_dim)
+        else:
+            fake = self.gen_net(z)
+
+        assert batch.device == fake.device
         shape3d = (len(batch), self.n_part, self.n_dim)
 
         if scale:
@@ -399,27 +367,22 @@ class TransGan(pl.LightningModule):
         else:
             opt_g = torch.optim.RMSprop(self.gen_net.parameters(), lr=self.config["lr_g"])
             opt_d = torch.optim.RMSprop(self.dis_net.parameters(), lr=self.config["lr_d"])
-        if self.config["sched"]==None:
+        if self.config["sched"] == "cosine":
+            lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
+            max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
+            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches // self.freq_d
+            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d)
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches, max_iters=max_iter_g)
+        elif self.config["sched"] == "cosine2":
+            lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
+            max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
+            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches
+            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d // 3)
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches, max_iters=max_iter_g // 3)
+        else:
             lr_scheduler_nf = None
             lr_scheduler_d = None
             lr_scheduler_g = None
-        elif self.config["sched"].find("cosine")>-1:
-            lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
-            warmup=30*self.train_nf * self.num_batches
-
-            max_iter_d = self.config["max_epochs"] * self.num_batches - warmup//2//30
-            max_iter_g = self.config["max_epochs"] * self.num_batches - warmup//30
-            if self.config["sched"].find("2")>-1:
-                lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=warmup, max_iters=max_iter_d // 3)
-                lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=warmup, max_iters=max_iter_g // 3)
-            else:
-
-                lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=warmup, max_iters=max_iter_d)
-                lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=warmup, max_iters=max_iter_g)
-       
-           
-            
-        
         if self.config["sched"] != None:
             return [opt_nf, opt_d, opt_g], [lr_scheduler_nf, lr_scheduler_d, lr_scheduler_g]
         else:
@@ -494,7 +457,6 @@ class TransGan(pl.LightningModule):
         """training loop of the model, here all the data is passed forward to a gaussian
         This is the important part what is happening here. This is all the training we do"""
         mask = batch[:, 90:]
-        self.train()
         batch = batch[:, :90]
         opt_nf, opt_d, opt_g = self.optimizers()
         if self.config["sched"]:
@@ -549,7 +511,6 @@ class TransGan(pl.LightningModule):
                 d_loss = nn.MSELoss()(pred, target).mean()
             opt_d.zero_grad()
             self.manual_backward(d_loss)
-            torch.nn.utils.clip_grad_norm_(self.dis_net.parameters(), 5.)
             if self.global_step > 10:
                 opt_d.step()
             else:
@@ -594,8 +555,6 @@ class TransGan(pl.LightningModule):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
         mask = batch[:, 90:].cpu()
         batch = batch[:, :90].cpu()
-        mask_test = self.sample_n(mask)
-        mask_test=mask
         self.dis_net.train()
         self.gen_net.train()
         self.data_module.scaler.to("cpu")
@@ -606,11 +565,11 @@ class TransGan(pl.LightningModule):
 
         with torch.no_grad():
             logprob = -self.flow.log_prob(batch).mean() / 90
-            gen, true, z, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch, mask_test,scale=True)
+            gen, true, z, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch, scale=True)
             if self.config["mass"]:
                 m_t = mass(batch.reshape(len(batch), self.n_part * self.n_dim), self.config["canonical"])
                 m_f = mass(gen.reshape(len(batch), self.n_part * self.n_dim), self.config["canonical"])
-            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask_test)
+            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask)
             scores_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), None if not self.config["mass"] else m_t, mask=mask)
 
         bins = 50

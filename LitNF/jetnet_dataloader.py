@@ -73,10 +73,9 @@ class JetNetDataloader(pl.LightningDataModule):
         data = pd.read_csv(data_dir, sep=" ", header=None)
         df = pd.DataFrame()
         limit = int(self.config["limit"] * 1.1)
+
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
         masks = data.values[:, np.arange(3, 120, 4)][:limit]
-        self.n = masks.sum(axis=1)
-
         df = data.drop(np.arange(3, 120, 4), axis=1)[: limit]
 
         # stacking together differnet samples with different number particles per jet
