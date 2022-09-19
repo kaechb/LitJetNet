@@ -290,7 +290,16 @@ class TransGan(pl.LightningModule):
                 raise ValueError("5 nangrads in a row")
         else:
             self.counter = 0
-
+    def sample_n(self, mask):
+        #Samples a mask where the zero padded particles are True, rest False
+        mask_test = torch.ones_like(mask)
+        n, counts = np.unique(self.data_module.n, return_counts=True)
+        counts_prob = torch.tensor(counts / len(self.data_module.n) )
+        n_test=n[torch.multinomial(counts_prob,replacement=True,num_samples=(len(mask)))] 
+        indices = torch.arange(30, device=mask.device)
+        mask_test = (indices.view(1, -1) < torch.tensor(n_test).view(-1, 1))      
+        mask_test=~mask_test.bool()
+        return (mask_test)
     def build_flow(self):
         K = self.config["coupling_layers"]
         for i in range(K):
@@ -559,6 +568,8 @@ class TransGan(pl.LightningModule):
         batch = batch[:, :90].cpu()
         self.dis_net.train()
         self.gen_net.train()
+        self.flow.train()
+        mask_test=self.sample_n(mask)
         self.data_module.scaler.to("cpu")
         batch = batch.to("cpu")
         self.flow = self.flow.to("cpu")
@@ -571,7 +582,7 @@ class TransGan(pl.LightningModule):
             if self.config["mass"]:
                 m_t = mass(batch.reshape(len(batch), self.n_part * self.n_dim), self.config["canonical"])
                 m_f = mass(gen.reshape(len(batch), self.n_part * self.n_dim), self.config["canonical"])
-            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask)
+            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask_test)
             scores_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), None if not self.config["mass"] else m_t, mask=mask)
 
         bins = 50

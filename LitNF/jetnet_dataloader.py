@@ -86,7 +86,7 @@ class JetNetDataloader(pl.LightningDataModule):
 
         z = torch.tensor(df.values).reshape(len(df), 30, 3)
         m = (torch.tensor(masks).reshape(len(df), 30)).bool()
-
+        self.n = masks.sum(axis=1)
         self.data = z
         self.data[~m, :] = (
             torch.normal(mean=torch.zeros_like(self.data[~m, :]), std=1).abs() * 1e-7

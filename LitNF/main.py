@@ -67,7 +67,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
         log_every_n_steps=10,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
-        progress_bar_refresh_rate=int(not hyperopt) * 10,
+        progress_bar_refresh_rate=0,
         check_val_every_n_epoch=config["val_check"],
         num_sanity_val_steps=1,  # gradient_clip_val=.02, 
         fast_dev_run=False,
