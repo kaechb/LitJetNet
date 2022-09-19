@@ -203,7 +203,7 @@ class TransGan(pl.LightningModule):
             use_batch_norm=self.config["batchnorm"] if "batchnorm" in self.config.keys() else 0,
         )
 
-    def __init__(self, config, hyperopt, num_batches):
+    def __init__(self, config, num_batches):
         """This initializes the model and its hyperparameters"""
         super().__init__()
         self.hyperopt = True
@@ -395,9 +395,11 @@ class TransGan(pl.LightningModule):
         interpolates = alpha * real_samples + ((1 - alpha) * fake_samples)
         if self.config["mass"]:
             m = mass(interpolates.reshape(len(real_samples), self.n_part * self.n_dim).detach())
-            d_interpolates = D.train()(interpolates.requires_grad_(True), m.requires_grad_(True), mask=mask)
+            #mask must be set to None otherwise nan grad
+            d_interpolates = D.train()(interpolates.requires_grad_(True), m.requires_grad_(True), mask=None)
         else:
-            d_interpolates = D.train()(interpolates.requires_grad_(True), mask=mask)
+            #mask must be set to None otherwise nan grad
+            d_interpolates = D.train()(interpolates.requires_grad_(True), mask=None)
         fake = torch.ones([real_samples.shape[0], 1], requires_grad=False).to(real_samples.device)
         # Get gradient w.r.t. interpolates
         gradients = torch.autograd.grad(
