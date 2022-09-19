@@ -67,7 +67,7 @@ class JetNetDataloader(pl.LightningDataModule):
     def setup(self, stage):
         # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        data_dir = os.environ["HOME"] + "/JetNet_NF/train_{}_jets.csv".format(
+        data_dir = os.environ["HOME"] + "/JetNet_NF/LitJetNet/train_{}_jets.csv".format(
             self.config["parton"]
         )
         data = pd.read_csv(data_dir, sep=" ", header=None)
