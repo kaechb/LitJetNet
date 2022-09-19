@@ -1,0 +1,46 @@
+config:
+  autoreg: false
+  context_features: 0
+  network_layers: 3
+  network_layers_nf: 2
+  network_nodes_nf: 256
+  batch_size: 1024
+  coupling_layers: 15
+  lr: 0.001
+  batchnorm: false
+  bins: 5
+  tail_bound: 6
+  limit: 150000
+  n_dim: 3
+  dropout: 0.2
+  canonical: false
+  max_steps: 100000
+  lambda: 1
+  name: Transflow_best
+  disc: false
+  variable: 1
+  parton: t
+  wgan: false
+  corr: true
+  num_layers: 4
+  freq: 6
+  n_part: 30
+  fc: false
+  hidden: 500
+  heads: 4
+  l_dim: 100
+  lr_g: 0.0004327405312571664
+  lr_d: 0.0004327405312571664
+  lr_nf: 0.000722
+  sched: cosine2
+  opt: RMSprop
+  max_epochs: 3200
+  mass: true
+  no_hidden: false
+  clf: true
+  val_check: 50
+  frac_pretrain: 80
+  seed: 69
+  quantile: false
+hyperopt: true
+num_batches: 112
