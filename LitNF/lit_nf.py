@@ -84,7 +84,8 @@ class Gen(nn.Module):
             x = x.reshape(len(x), self.n_part, self.n_dim)
         else:
             x = self.embbed(x)
-            x = self.encoder(x, src_key_padding_mask=mask)
+            x = self.encoder(x, src_key_padding_mask=mask,)#attention_mask.bool()
+
             if not self.no_hidden==True:
 
                 x = leaky_relu(self.hidden(x))
@@ -167,7 +168,7 @@ class Disc(nn.Module):
             if self.clf:
                 x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
                 mask = torch.concat((torch.ones_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device)
-
+                  
                 x = self.encoder(x, src_key_padding_mask=mask)
                 x = x[:, 0, :]
             else:
@@ -385,7 +386,7 @@ class TransGan(pl.LightningModule):
         elif self.config["sched"] == "cosine2":
             lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
             max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches
+            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//self.freq_d
             lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d // 3)
             lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches, max_iters=max_iter_g // 3)
         else:
