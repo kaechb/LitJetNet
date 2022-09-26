@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import QuantileTransformer
 from helpers import *
-
+import jetnet
 
 class StandardScaler:
     def __init__(self, mean=None, std=None, epsilon=1e-7):
@@ -67,35 +67,19 @@ class JetNetDataloader(pl.LightningDataModule):
     def setup(self, stage):
         # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        data_dir = os.environ["HOME"] + "/JetNet_NF/LitJetNet/train_{}_jets.csv".format(
-            self.config["parton"]
-        )
-        data = pd.read_csv(data_dir, sep=" ", header=None)
-        df = pd.DataFrame()
-        limit = int(self.config["limit"] * 1.1)
-
+        data=jetnet.datasets.JetNet("t",normalize=False).data   
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
-        masks = data.values[:, np.arange(3, 120, 4)][:limit]
-        df = data.drop(np.arange(3, 120, 4), axis=1)[: limit]
-
-        # stacking together differnet samples with different number particles per jet
-
-        # calculating mass per jet
-        #         self.m=mass(self.data[:,:self.n_dim]).reshape(-1,1)
-        # Adding noise to zero padded jets.
-
-        z = torch.tensor(df.values).reshape(len(df), 30, 3)
-        m = (torch.tensor(masks).reshape(len(df), 30)).bool()
+        masks = data[:,:,-1].bool()
         self.n = masks.sum(axis=1)
-        self.data = z
-        # self.data[~m, :] = (
-        #     torch.normal(mean=torch.zeros_like(self.data[~m, :]), std=1).abs() * 1e-7
-        # )
+        self.data =  data[:,:,:-1]
+        masks = ~masks
+        self.data[masks, :] = (
+            torch.normal(mean=torch.zeros_like(self.data[masks, :]), std=1).abs() * 1e-7
+        )
         # standard scaling
         self.scaler = StandardScaler()
         if self.config["quantile"]:
             self.ptscaler = QuantileTransformer(output_distribution="uniform")
-
             self.data[:, :, :2] = self.scaler.fit_transform(self.data[:, :, :2])
             self.data[:, :, 2] = torch.tensor(
                 self.ptscaler.fit_transform(self.data[:, :, 2].numpy())
@@ -104,14 +88,12 @@ class JetNetDataloader(pl.LightningDataModule):
             self.data = self.data.reshape(len(self.data), 90)
         else:
             self.data=self.scaler.fit_transform(self.data)
-        self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data),self.n_part*self.n_dim), m)))
+        self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data),self.n_part*self.n_dim), masks)))
         self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
-
-
         self.test_set = torch.tensor(self.test_set).float()
         self.data = torch.tensor(self.data).float()
         self.num_batches = len(self.data) // self.config["batch_size"]
-        #         assert self.data.shape[1]==92
+
         assert (torch.isnan(self.data)).sum() == 0
 
     def train_dataloader(self):
