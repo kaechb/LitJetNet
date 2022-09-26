@@ -88,9 +88,9 @@ class JetNetDataloader(pl.LightningDataModule):
         m = (torch.tensor(masks).reshape(len(df), 30)).bool()
         self.n = masks.sum(axis=1)
         self.data = z
-        self.data[~m, :] = (
-            torch.normal(mean=torch.zeros_like(self.data[~m, :]), std=1).abs() * 1e-7
-        )
+        # self.data[~m, :] = (
+        #     torch.normal(mean=torch.zeros_like(self.data[~m, :]), std=1).abs() * 1e-7
+        # )
         # standard scaling
         self.scaler = StandardScaler()
         if self.config["quantile"]:

@@ -167,7 +167,8 @@ class Disc(nn.Module):
             x = self.embbed(x)
             if self.clf:
                 x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
-                mask = torch.concat((torch.ones_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device)
+                if not mask==None:
+                    mask = torch.concat((torch.ones_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device)
                   
                 x = self.encoder(x, src_key_padding_mask=mask)
                 x = x[:, 0, :]
@@ -328,11 +329,13 @@ class TransGan(pl.LightningModule):
         and reverses the standard scaling that is done in the preprocessing. This allows to calculate the mass
         on the generative sample and to compare to the simulated one, we need to inverse the scaling before calculating the mass
         because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
+
         with torch.no_grad():
 
             z = self.flow.sample(len(batch)).reshape(len(batch), self.n_part, self.n_dim)
         if self.add_corr:
-            fake = z + self.gen_net(z, mask=mask)  # (1-self.alpha)*
+            fake = z + self.gen_net(z, mask=None)#(mask.bool()))  # (1-self.alpha)*
+            #fake = fake*(~mask).reshape(len(batch),30,1)
             fake = fake.reshape(len(batch), self.n_part, self.n_dim)
         else:
             fake = self.gen_net(z)
@@ -380,15 +383,15 @@ class TransGan(pl.LightningModule):
         if self.config["sched"] == "cosine":
             lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
             max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches // self.freq_d
+            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches // (self.freq_d-1)
             lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d)
-            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches, max_iters=max_iter_g)
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 //self.freq_d* self.num_batches, max_iters=max_iter_g)
         elif self.config["sched"] == "cosine2":
             lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
             max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//self.freq_d
-            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=15 * self.num_batches, max_iters=max_iter_d // 3)
-            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=15 * self.num_batches, max_iters=max_iter_g // 3)
+            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//(self.freq_d-1)
+            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=1500 * self.num_batches, max_iters=max_iter_d )#15,150 // 3
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=1500 * self.num_batches //(self.freq_d-1), max_iters=max_iter_g)#  // 3
         else:
             lr_scheduler_nf = None
             lr_scheduler_d = None
@@ -468,7 +471,8 @@ class TransGan(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         """training loop of the model, here all the data is passed forward to a gaussian
         This is the important part what is happening here. This is all the training we do"""
-        mask = batch[:, 90:]
+        mask = batch[:, 90:].bool()
+
         batch = batch[:, :90]
         opt_nf, opt_d, opt_g = self.optimizers()
         if self.config["sched"]:
@@ -498,7 +502,8 @@ class TransGan(pl.LightningModule):
             if self.config["sched"] != None:
                 sched_d.step()
             batch = batch.reshape(len(batch), self.n_part, self.n_dim)
-            fake = self.sampleandscale(batch, mask, scale=False)
+            #batch = batch*mask.reshape(-1,30,1)
+            fake = self.sampleandscale(batch, None, scale=False)#~(mask.bool())
             if self.config["mass"]:
                 m_t = mass(
                     batch.reshape(len(batch), self.n_part * self.n_dim),
@@ -508,11 +513,11 @@ class TransGan(pl.LightningModule):
                     fake.reshape(len(batch), self.n_part * self.n_dim),
                     self.config["canonical"],
                 )
-            pred_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=mask)
-            pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=mask)
+            pred_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=None)#~(mask.bool())
+            pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=None)#~(mask.bool())
             if self.wgan:
                 # gradient_penalty = self.compute_gradient_penalty(self.dis_net, batch, fake.detach(), mask, 1)
-                gradient_penalty = self.compute_gradient_penalty2(batch, fake.detach(), pred_real, pred_fake,mask)
+                gradient_penalty = self.compute_gradient_penalty2(batch, fake.detach(), pred_real, pred_fake,None)
                 self.log("gradient penalty", gradient_penalty, logger=True)
                 d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1)) + gradient_penalty
             else:
@@ -535,8 +540,9 @@ class TransGan(pl.LightningModule):
 
             if (self.current_epoch > self.train_nf and self.global_step % self.freq_d < 2) or self.global_step <= 3:
                 opt_g.zero_grad()
-                fake = self.sampleandscale(batch, mask, scale=False)
-                pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)
+                fake = self.sampleandscale(batch, None, scale=False)#~(mask.bool())
+                
+                pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=None)#~(mask.bool())
                 target_real = torch.ones_like(pred_fake)
                 if self.wgan:
                     g_loss = -torch.mean(pred_fake.view(-1))
@@ -556,8 +562,8 @@ class TransGan(pl.LightningModule):
             # Control plot train
             if self.current_epoch % 5 == 0 and self.current_epoch > self.train_nf / 2:
                 fig, ax = plt.subplots()
-                ax.hist(pred_fake.detach().cpu().numpy(), label="fake", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
                 ax.hist(pred_real.detach().cpu().numpy(), label="real", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
+                ax.hist(pred_fake.detach().cpu().numpy(), label="fake", bins=np.linspace(0, 1, 30) if not self.wgan else 30, histtype="step")
                 ax.legend()
                 plt.ylabel("Counts")
                 plt.xlabel("Critic Score")
@@ -579,12 +585,12 @@ class TransGan(pl.LightningModule):
 
         with torch.no_grad():
             logprob = -self.flow.log_prob(batch).mean() / 90
-            gen, true, z, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch, scale=True)
+            gen, true, z, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch, scale=True,mask=None)#mask_test
             if self.config["mass"]:
                 m_t = mass(batch.reshape(len(batch), self.n_part * self.n_dim), self.config["canonical"])
                 m_f = mass(gen.reshape(len(batch), self.n_part * self.n_dim), self.config["canonical"])
-            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask_test)
-            scores_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), None if not self.config["mass"] else m_t, mask=mask)
+            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=None)#mask_test 
+            scores_real = self.dis_net(batch.reshape(len(batch), self.n_part, self.n_dim), None if not self.config["mass"] else m_t, mask=None)#~(mask.bool())
 
         bins = 50
         fig = plt.figure()

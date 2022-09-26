@@ -37,7 +37,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
 
     callbacks = [
         ModelCheckpoint(
-            monitor="val_w1m",
+            monitor="val_fpnd",
             save_top_k=2,
             filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}",
             dirpath=root,
@@ -64,7 +64,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
-        log_every_n_steps=10,  # auto_scale_batch_size="binsearch",
+        log_every_n_steps=500,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
         progress_bar_refresh_rate=0,
@@ -104,6 +104,9 @@ if __name__ == "__main__":
         config=yaml.load(stream,Loader=yaml.Loader)
         print(config)
         config=config["config"]
+    config["name"]="fix_mask"
+    config["freq_d"]=3
+    # config["opt"]="Adam"
     if len(sys.argv) > 2:
         root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/"+config["parton"]+"_" +"run"+sys.argv[1]+"_"+str(sys.argv[2])
     else:
