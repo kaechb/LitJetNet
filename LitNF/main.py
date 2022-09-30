@@ -58,6 +58,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
     # model.config = config #config are our hyperparams, we make this a class property now
     print(root)
     logger = TensorBoardLogger(root)
+    print("Version:",logger.version)
     # log every n steps could be important as it decides how often it should log to tensorboard
     # Also check val every n epochs, as validation checking takes some time
 
@@ -88,25 +89,47 @@ if __name__ == "__main__":
         "sched",
         "opt",
         "no_hidden",
-        "clf",
-        "batch_size",
-        "freq",
-        "seed",
+        "last_clf",
+        "warmup",
+        "lr_d",
         "lr_g",
-        "heads",
-        "hidden",
-        "l_dim",
-        "num_layers",
-        "val_check",
+        "ratio"
     ]
     best_hparam="/beegfs/desy/user/kaechben/Transflow_best/lightning_logs/version_72/hparams.yaml"
     with open(best_hparam, 'r') as stream:
         config=yaml.load(stream,Loader=yaml.Loader)
         print(config)
         config=config["config"]
-    config["name"]="fix_mask"
-    config["freq_d"]=3
-    # config["opt"]="Adam"
+    hyperopt=True
+    if hyperopt:
+        config["last_clf"]=np.random.choice([True,False])
+        # config["no_hidden"]=np.random.choice([True,False,"more"])
+        # config["no_hidden"]=config["no_hidden"]=="True" or config["no_hidden"]=="more"
+
+        config["gen_mask"]=np.random.choice([True,False])
+        config["bullshitbingo"]=np.random.choice([True,False])
+        config["bullshitbingo2"]=np.random.choice([True,False])
+
+        config["max_epochs"]=int(config["max_epochs"]*np.random.choice([1,2,3]))
+        config["warmup"]=np.random.choice([50,150,800,1500])
+        config["sched"]=np.random.choice(["cosine","cosine2",None])
+        config["name"]="fix_mask_scan3"
+        config["freq"]=np.random.choice([5,6,7])    # config["opt"]="Adam"
+        config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
+        config["dropout"]=np.random.choice([0.3,0.4,0.5])    
+        config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
+        config["lr_g"]=np.random.choice([0.0005,0.0001,0.00005])  
+        config["ratio"]=np.random.choice([0.9,1,1.3,1.5])
+
+        config["lr_d"]=config["lr_g"]*config["ratio"]
+        # config["num_layers"]=np.random.choice([2,3,4])    
+    else:
+        config["last_clf"]=True
+        config["gen_mask"]=True
+        config["warmup"]=15
+        config["name"]="fix_mask"
+        config["freq"]=6    # config["opt"]="Adam"
+    print(config)
     if len(sys.argv) > 2:
         root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/"+config["parton"]+"_" +"run"+sys.argv[1]+"_"+str(sys.argv[2])
     else:

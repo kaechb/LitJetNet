@@ -8,7 +8,6 @@ import numpy as np
 import hist
 from hist import Hist
 import traceback
-from helpers import mass
 import pandas as pd
 import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -74,17 +73,18 @@ import time
 
 print("good boy")
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
-def mass(data, canonical=False):
+def mass(p, canonical=False):
+    if len(p.shape)!=3:
+        n_dim = p.shape[1]
+        p = p.reshape(-1, n_dim // 3, 3)
     if canonical:
-        n_dim = data.shape[1]
-        p = data.reshape(-1, n_dim // 3, 3)
+       
         px = p[:, :, 0]
         py = p[:, :, 1]
         pz = p[:, :, 2]
 
     else:
-        n_dim = data.shape[1]
-        p = data.reshape(-1, n_dim // 3, 3)
+
         px = torch.cos(p[:, :, 1]) * p[:, :, 2]
         py = torch.sin(p[:, :, 1]) * p[:, :, 2]
         pz = torch.sinh(p[:, :, 0]) * p[:, :, 2]
@@ -128,9 +128,9 @@ class plotting:
     ):
         self.config = model.config
         self.n_dim = self.config["n_dim"]
-        self.gen = gen.numpy()
-        self.gen_corr = gen_corr.numpy()
-        self.test_set = true.numpy()
+        self.gen = gen.numpy().reshape(len(gen),90)
+        self.gen_corr = gen_corr.numpy().reshape(len(gen_corr),90)
+        self.test_set = true.numpy().reshape(len(true),90)
         self.step = step
         self.model = model
         if logger is not None:
@@ -311,3 +311,11 @@ class plotting:
         #             self.summary.close()
         else:
             plt.show()
+    def plot_scores(self,pred_real,pred_fake,train,step):
+        fig, ax = plt.subplots()
+        _,bins,_=ax.hist(pred_real.detach().cpu().numpy(), label="MC Simulated", bins=np.linspace(-0.1,1.1,100), histtype="step")
+        ax.hist(pred_fake.detach().cpu().numpy(), label="ML Generated", bins=bins, histtype="step")
+        ax.legend()
+        plt.ylabel("Counts")
+        plt.xlabel("Critic Score")
+        self.summary.add_figure("class_train" if train else "class_val", fig, global_step=step)

@@ -67,37 +67,42 @@ class JetNetDataloader(pl.LightningDataModule):
     def setup(self, stage):
         # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        data=jetnet.datasets.JetNet("t",normalize=False).data   
+        data=jetnet.datasets.JetNet("t",normalize=False,train=True).data   
+        test_set=jetnet.datasets.JetNet("t",normalize=False,train=False).data   
+        self.data=torch.cat((data,test_set),dim=0)
+        
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
-        masks = data[:,:,-1].bool()
+        masks = self.data[:,:,-1].bool()
+        self.data=self.data[:,:,:-1]
         self.n = masks.sum(axis=1)
-        self.data =  data[:,:,:-1]
+        
         masks = ~masks
-        self.data[masks, :] = (
-            torch.normal(mean=torch.zeros_like(self.data[masks, :]), std=1).abs() * 1e-7
-        )
+        self.data[masks, :] = (torch.normal(mean=torch.zeros_like(self.data[masks, :]), std=1).abs() * 1e-7)
+        self.scalers=[]
+        
         # standard scaling
-        self.scaler = StandardScaler()
-        if self.config["quantile"]:
-            self.ptscaler = QuantileTransformer(output_distribution="uniform")
-            self.data[:, :, :2] = self.scaler.fit_transform(self.data[:, :, :2])
-            self.data[:, :, 2] = torch.tensor(
-                self.ptscaler.fit_transform(self.data[:, :, 2].numpy())
-            )
-            self.min_pt = self.data[:, :, 2].min(axis=0)[0]
-            self.data = self.data.reshape(len(self.data), 90)
-        else:
-            self.data=self.scaler.fit_transform(self.data)
+        for i in range(self.n_part):
+            self.scalers.append(StandardScaler())
+            if self.config["quantile"]:
+                self.ptscalers.append(QuantileTransformer(output_distribution="normal"))
+                self.data[:, i, :2] = self.scaler.fit_transform(self.data[:, i, :2])
+                self.data[:, i, 2] = torch.tensor(
+                    self.ptscaler.fit_transform(self.data[:, i, 2].numpy())
+                )        
+            else:
+                self.data[:,i,:]=self.scalers[i].fit_transform(self.data[:,i,:])
+        self.data = self.data.reshape(len(self.data), 90)
         self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data),self.n_part*self.n_dim), masks)))
-        self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
-        self.test_set = torch.tensor(self.test_set).float()
+        # self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
+        self.test_set = self.data[-len(test_set):].float()
+        self.data = self.data[:-len(test_set)].float()
         self.data = torch.tensor(self.data).float()
         self.num_batches = len(self.data) // self.config["batch_size"]
-
+        
         assert (torch.isnan(self.data)).sum() == 0
 
     def train_dataloader(self):
-        return DataLoader(self.data, batch_size=self.batch_size, drop_last=True)
+        return DataLoader(self.data, batch_size=self.batch_size, drop_last=True,num_workers=40)
 
     def val_dataloader(self):
-        return DataLoader(self.test_set, batch_size=len(self.test_set), drop_last=True)
+        return DataLoader(self.test_set, batch_size=len(self.test_set), drop_last=True,num_workers=40)
