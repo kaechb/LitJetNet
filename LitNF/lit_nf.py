@@ -322,7 +322,12 @@ class TransGan(pl.LightningModule):
         because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
         assert mask.dtype==torch.bool
         with torch.no_grad():
-            z = self.flow.sample(len(batch)).reshape(len(batch), self.n_part, self.n_dim)
+            if  self.config["context_features"]:
+                c=mask.clone()
+                c = (~c).sum(axis=1).reshape(-1,1).float()
+            else: 
+                c=None
+            z = self.flow.sample(len(batch) if self.config["context_features"]==0 else 1,context=c.float()).reshape(len(batch), self.n_part, self.n_dim)
         fake = z + self.gen_net(z, mask=mask)
         # fake = fake*((~mask).reshape(len(batch),30,1).float()) #somehow this gives nangrad
         fake[mask]=0
@@ -330,21 +335,28 @@ class TransGan(pl.LightningModule):
             fake_scaled = fake.clone()
             true = batch.clone()
             z_scaled = z.clone()
-            for i in range(self.n_part):
-                if self.config["quantile"]:
-                    self.data_module.scaler = self.data_module.scalers[i].to(batch.device)
-                    fake_scaled[:, i, :2] = self.data_module.scalers[i].inverse_transform(fake[:, i, :2])
-                    z_scaled[:, :, :2] = self.data_module.scalers[i].inverse_transform(z[:, i, :2])
-                    true[:, :, :2] = self.data_module.scalers[i].inverse_transform(true[:, i, :2])
-                    fake_scaled[:, :, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(fake[:, i, 2].reshape(len(batch), self.n_part).numpy())).float()
-                    z_scaled[:, :, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(z[:, i, 2].reshape(len(batch), self.n_part).numpy())).float()
-                    true[:, :, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(batch.reshape(len(batch), self.n_part, 3)[:, i, 2].numpy())).float()
-                    return fake, fake_scaled, true, z_scaled
-                else:
-                    self.data_module.scalers[i] = self.data_module.scalers[i].to(batch.device)
-                    fake_scaled[:,i,:] = self.data_module.scalers[i].inverse_transform(fake[:,i,:])
-                    z_scaled[:,i,:] = self.data_module.scalers[i].inverse_transform(z[:,i,:])
-                    true[:,i,:] = self.data_module.scalers[i].inverse_transform(batch[:,i,:])
+            if self.config["scalingbullshit"]:
+                self.data_module.scaler = self.data_module.scaler.to(batch.device)
+                fake_scaled=self.data_module.scaler.inverse_transform(fake_scaled)
+                z_scaled=self.data_module.scaler.inverse_transform(z_scaled)
+                true=self.data_module.scaler.inverse_transform(true)
+            else:
+                for i in range(self.n_part):
+                    if self.config["quantile"]:
+                        self.data_module.scaler = self.data_module.scalers[i].to(batch.device)
+                        fake_scaled[:, i, :2] = self.data_module.scalers[i].inverse_transform(fake[:, i, :2])
+                        z_scaled[:, :, :2] = self.data_module.scalers[i].inverse_transform(z[:, i, :2])
+                        true[:, :, :2] = self.data_module.scalers[i].inverse_transform(true[:, i, :2])
+                        fake_scaled[:, :, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(fake[:, i, 2].reshape(len(batch), self.n_part).numpy())).float()
+                        z_scaled[:, :, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(z[:, i, 2].reshape(len(batch), self.n_part).numpy())).float()
+                        true[:, :, 2] = torch.tensor(self.data_module.ptscalers[i].inverse_transform(batch.reshape(len(batch), self.n_part, 3)[:, i, 2].numpy())).float()
+                        return fake, fake_scaled, true, z_scaled
+                    else:
+                        
+                        self.data_module.scalers[i] = self.data_module.scalers[i].to(batch.device)
+                        fake_scaled[:,i,:] = self.data_module.scalers[i].inverse_transform(fake[:,i,:])
+                        z_scaled[:,i,:] = self.data_module.scalers[i].inverse_transform(z[:,i,:])
+                        true[:,i,:] = self.data_module.scalers[i].inverse_transform(batch[:,i,:])
             fake_scaled[mask]=0
             z_scaled[mask]=0
             return fake, fake_scaled, true, z_scaled
@@ -371,7 +383,7 @@ class TransGan(pl.LightningModule):
                 self.freq_d+=1
             max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches // (self.freq_d-1)
             lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_d)
-            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] //self.freq_d* self.num_batches, max_iters=max_iter_g)
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_g)
             if self.config["bullshitbingo2"]:
                 self.freq_d-=1
         elif self.config["sched"] == "cosine2":
@@ -393,52 +405,6 @@ class TransGan(pl.LightningModule):
         else:
             return [opt_nf, opt_d, opt_g]
 
-    def compute_gradient_penalty(self, D, real_samples, fake_samples, mask, phi):
-        """Calculates the gradient penalty loss for WGAN GP"""
-        # Random weight term for interpolation between real and fake samples
-        alpha = torch.Tensor(np.random.random((real_samples.size(0), 1, 1))).to(real_samples.device)
-        interpolates = alpha * real_samples + ((1 - alpha) * fake_samples)
-        if self.config["mass"]:
-            m = mass(interpolates.reshape(len(real_samples), self.n_part * self.n_dim).detach())
-            #mask must be set to None otherwise nan grad
-            d_interpolates = D.train()(interpolates.requires_grad_(True), m.requires_grad_(True), mask=None)
-        else:
-            #mask must be set to None otherwise nan grad
-            d_interpolates = D.train()(interpolates.requires_grad_(True), mask=None)
-        fake = torch.ones([real_samples.shape[0], 1], requires_grad=False).to(real_samples.device)
-        # Get gradient w.r.t. interpolates
-        gradients = torch.autograd.grad(
-            outputs=d_interpolates,
-            inputs=interpolates,
-            grad_outputs=fake,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0]
-        gradients = gradients.view(gradients.size(0), -1)
-        gradient_penalty = ((gradients.norm(2, dim=1) - phi) ** 2).mean()
-        return gradient_penalty
-
-    def compute_gradient_penalty2(self, real, fake, pred_real, pred_fake,mask):
-        k = 2
-        p = 6
-        real = real.reshape(len(real),self.n_part,self.n_dim)
-        fake = fake.reshape(len(real),self.n_part,self.n_dim)
-        fake = Variable(fake, requires_grad=True)
-        real = Variable(real, requires_grad=True)
-        m_t=mass(real.reshape(len(real),self.n_part*self.n_dim))
-        m_f=mass(fake.reshape(len(real),self.n_part*self.n_dim))
-        pred_real = self.dis_net(real, None if not self.config["mass"] else m_t, mask=mask)
-        pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)
-        real_grad_out = Variable(torch.cuda.FloatTensor(real.size(0), 1).fill_(1.0), requires_grad=False)
-        real_grad = autograd.grad(pred_real, real, grad_outputs=real_grad_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
-        real_grad_norm = real_grad.view(real_grad.size(0), -1).pow(2).sum(1) ** (p / 2)
-        fake_grad_out = Variable(torch.cuda.FloatTensor(fake.size(0), 1).fill_(1.0), requires_grad=False)
-        fake_grad = autograd.grad(pred_fake, fake, grad_outputs=fake_grad_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
-        fake_grad_norm = fake_grad.view(fake_grad.size(0), -1).pow(2).sum(1) ** (p / 2)
-        div_gp = torch.mean(real_grad_norm + fake_grad_norm) * k / 2
-        return div_gp
-
    
     def training_step(self, batch, batch_idx):
         """training loop of the model, here all the data is passed forward to a gaussian
@@ -446,6 +412,11 @@ class TransGan(pl.LightningModule):
         mask = batch[:, 90:].bool()
 
         batch = batch[:, :90]
+        if  self.config["context_features"]:
+            c=mask.clone()
+            c = (~c).sum(axis=1).reshape(-1,1)
+        else: 
+            c=None
         opt_nf, opt_d, opt_g = self.optimizers()
         if self.config["sched"]:
             sched_nf, sched_d, sched_g = self.lr_schedulers()
@@ -458,7 +429,7 @@ class TransGan(pl.LightningModule):
         if self.current_epoch < self.train_nf:
             if self.config["sched"] != None:
                 sched_nf.step()
-            nf_loss = -self.flow.to(self.device).log_prob(batch).mean()
+            nf_loss = -self.flow.to(self.device).log_prob(batch,context=c.float()).mean()
             nf_loss /= self.n_dim * self.n_part
             opt_nf.zero_grad()
             self.manual_backward(nf_loss)
@@ -529,6 +500,11 @@ class TransGan(pl.LightningModule):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
         mask = batch[:, 90:].cpu().bool()
         batch = batch[:, :90].cpu()
+        if  self.config["context_features"]:
+            c=mask.clone()
+            c = (~c).sum(axis=1).reshape(-1,1).float()
+        else: 
+            c=None
         self.dis_net.train()
         self.gen_net.train()
         self.flow.train()
@@ -539,7 +515,7 @@ class TransGan(pl.LightningModule):
         self.gen_net = self.gen_net.cpu()
         
         with torch.no_grad():
-            logprob = -self.flow.log_prob(batch).mean() / 90
+            logprob = -self.flow.log_prob(batch,context=c).mean() / 90
             batch = batch.reshape(len(batch),30,3)
             gen, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch,mask_test, scale=True)#mask_test
             batch[mask]=0
@@ -571,7 +547,7 @@ class TransGan(pl.LightningModule):
         w1efp_ = w1efp(fake_scaled, true_scaled)[0]
         self.w1ms.append(w1m_)
         self.fpnds.append(fpndv)
-        if (np.array([self.fpnds])[-4:] > 2).all() and self.current_epoch > 600 and not self.config["bullshitbingo2"] or (np.array([self.w1ms])[-4:] > 0.006).all() and self.current_epoch > 1500 and not self.config["bullshitbingo2"]:
+        if (np.array([self.fpnds])[-4:] > 4).all() and self.current_epoch > self.config["max_epochs"]/5.4 and not self.config["bullshitbingo2"] or (np.array([self.w1ms])[-4:] > 0.006).all() and self.current_epoch > self.config["max_epochs"]/2 and not self.config["bullshitbingo2"]:
             print("no convergence, stop training")
             raise
 
