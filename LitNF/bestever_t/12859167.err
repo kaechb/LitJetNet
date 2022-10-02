@@ -1,0 +1,74 @@
+/home/kaechben/JetNet_NF/LitJetNet/LitNF/jetnet_dataloader.py:104: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  self.data = torch.tensor(self.data).float()
+/home/kaechben/JetNet_NF/LitJetNet/LitNF/lit_nf.py:248: UserWarning: nn.init.xavier_normal is now deprecated in favor of nn.init.xavier_normal_.
+  nn.init.xavier_normal(p)
+/home/kaechben/JetNet_NF/LitJetNet/LitNF/lit_nf.py:252: UserWarning: nn.init.xavier_normal is now deprecated in favor of nn.init.xavier_normal_.
+  nn.init.xavier_normal(p)
+/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/pytorch_lightning/trainer/connectors/callback_connector.py:96: LightningDeprecationWarning: Setting `Trainer(progress_bar_refresh_rate=0)` is deprecated in v1.5 and will be removed in v1.7. Please pass `pytorch_lightning.callbacks.progress.TQDMProgressBar` with `refresh_rate` directly to the Trainer's `callbacks` argument instead. Or, to disable the progress bar pass `enable_progress_bar = False` to the Trainer.
+  rank_zero_deprecation(
+GPU available: True, used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/pytorch_lightning/callbacks/model_checkpoint.py:608: UserWarning: Checkpoint directory /beegfs/desy/user/kaechben/fix_mask_scan3 exists and is not empty.
+  rank_zero_warn(f"Checkpoint directory {dirpath} exists and is not empty.")
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name    | Type               | Params
+-----------------------------------------------
+0 | q0      | StandardNormal     | 0     
+1 | flows   | CompositeTransform | 6.6 M 
+2 | flow    | Flow               | 6.6 M 
+3 | gen_net | Gen                | 868 K 
+4 | dis_net | Disc               | 1.3 M 
+5 | sig     | Sigmoid            | 0     
+-----------------------------------------------
+8.8 M     Trainable params
+0         Non-trainable params
+8.8 M     Total params
+35.005    Total estimated model params size (MB)
+WARNING:matplotlib.font_manager:findfont: Font family ['normal'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['normal'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['normal'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXGeneral'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXGeneral'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXGeneral'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXNonUnicode'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXNonUnicode'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXNonUnicode'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXSizeOneSym'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXSizeTwoSym'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXSizeThreeSym'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXSizeFourSym'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['STIXSizeFiveSym'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmsy10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmr10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmtt10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmmi10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmb10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmss10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['cmex10'] not found. Falling back to DejaVu Sans.
+WARNING:matplotlib.font_manager:findfont: Font family ['DejaVu Sans Display'] not found. Falling back to DejaVu Sans.
+/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/mplhep/error_estimation.py:38: RuntimeWarning: All sumw are zero!  Cannot compute meaningful error bars
+  warnings.warn(
+/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/matplotlib/axes/_base.py:2475: UserWarning: Warning: converting a masked element to nan.
+  xys = np.asarray(xys)
+Traceback (most recent call last):
+  File "/home/kaechben/JetNet_NF/LitJetNet/LitNF/plotting.py", line 220, in plot_mass
+    main_ax_artists, sublot_ax_arists = h.plot_ratio(
+  File "/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/hist/basehist.py", line 471, in plot_ratio
+    return plot._plot_ratiolike(
+  File "/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/hist/plot.py", line 669, in _plot_ratiolike
+    subplot_ax_artists = plot_ratio_array(
+  File "/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/hist/plot.py", line 465, in plot_ratio_array
+    max_delta = np.amax(np.abs(extrema - central_value))
+  File "<__array_function__ internals>", line 5, in amax
+  File "/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/numpy/core/fromnumeric.py", line 2754, in amax
+    return _wrapreduction(a, np.maximum, 'max', axis, None, out,
+  File "/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/numpy/core/fromnumeric.py", line 86, in _wrapreduction
+    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)
+ValueError: zero-size array to reduction operation maximum which has no identity
+/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py:1927: PossibleUserWarning: The number of training batches (121) is smaller than the logging interval Trainer(log_every_n_steps=500). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+  rank_zero_warn(
+/beegfs/desy/user/kaechben/.conda/envs/jetnet/lib/python3.8/site-packages/torch/optim/lr_scheduler.py:131: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "

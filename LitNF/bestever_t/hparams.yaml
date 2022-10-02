@@ -1,0 +1,131 @@
+config:
+  autoreg: false
+  batch_size: 1024
+  batchnorm: false
+  bins: 5
+  bullshitbingo: &id001 !!python/object/apply:numpy.core.multiarray.scalar
+  - &id003 !!python/object/apply:numpy.dtype
+    args:
+    - b1
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - '|'
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    AA==
+  bullshitbingo2: *id001
+  canonical: false
+  clf: true
+  context_features: 1
+  corr: true
+  coupling_layers: 15
+  disc: false
+  dropout: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id002 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    mpmZmZmZyT8=
+  fc: false
+  frac_pretrain: 80
+  freq: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id004 !!python/object/apply:numpy.dtype
+    args:
+    - i8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    BQAAAAAAAAA=
+  gen_mask: *id001
+  heads: 4
+  hidden: 500
+  l_dim: 100
+  lambda: 1
+  last_clf: *id001
+  limit: 150000
+  lr: 0.001
+  lr_d: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id002
+  - !!binary |
+    lfYGX5hMRT8=
+  lr_g: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id002
+  - !!binary |
+    /Knx0k1iQD8=
+  lr_nf: 0.000722
+  mass: true
+  max_epochs: 9600
+  max_steps: 100000
+  n_dim: 3
+  n_part: 30
+  name: fix_mask_scan3
+  network_layers: 3
+  network_layers_nf: 2
+  network_nodes_nf: 256
+  no_hidden: false
+  num_layers: 4
+  opt: !!python/object/apply:numpy.core.multiarray.scalar
+  - !!python/object/apply:numpy.dtype
+    args:
+    - U4
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - 16
+    - 4
+    - 8
+  - !!binary |
+    QQAAAGQAAABhAAAAbQAAAA==
+  parton: t
+  quantile: false
+  ratio: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id002
+  - !!binary |
+    zczMzMzM9D8=
+  scalingbullshit: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id003
+  - !!binary |
+    AQ==
+  sched: cosine2
+  seed: 69
+  tail_bound: 6
+  val_check: 25
+  variable: 1
+  warmup: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id004
+  - !!binary |
+    MgAAAAAAAAA=
+  wgan: false
+num_batches: 121
