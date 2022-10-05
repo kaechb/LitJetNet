@@ -74,7 +74,7 @@ import time
 print("good boy")
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
 def mass(p, canonical=False):
-    if len(p.shape)!=3:
+    if len(p.shape)==2:
         n_dim = p.shape[1]
         p = p.reshape(-1, n_dim // 3, 3)
     if canonical:

@@ -91,7 +91,7 @@ class Gen(nn.Module):
         self.n_dim = n_dim
         self.l_dim = l_dim
         self.n_part = n_part
-        self.no_hidden = no_hidden
+        self.no_hidden_gen = no_hidden
         self.gen_mask = gen_mask
 
         
@@ -108,10 +108,10 @@ class Gen(nn.Module):
             ),
             num_layers=num_layers,
         )
-        if not self.no_hidden==True:
+        if not self.no_hidden_gen==True:
             self.hidden = nn.Linear(l_dim, hidden)
             self.hidden2 = nn.Linear(hidden, hidden)
-        if self.no_hidden=="more":
+        if self.no_hidden_gen=="more":
             self.hidden3 = nn.Linear(hidden, hidden)
         self.dropout = nn.Dropout(dropout / 2)
         self.out = nn.Linear(hidden, n_dim)
@@ -124,7 +124,7 @@ class Gen(nn.Module):
             mask = None
         x = self.embbed(x)
         x = self.encoder(x, src_key_padding_mask=mask,)#attention_mask.bool()
-        if self.no_hidden==True:
+        if self.no_hidden_gen==True:
             x = leaky_relu(x)
             x = self.out2(x)
         else:
@@ -132,7 +132,7 @@ class Gen(nn.Module):
             x = self.dropout(x)
             x = leaky_relu(self.hidden2(x))
             x = self.dropout(x)
-            if self.no_hidden=="more":
+            if self.no_hidden_gen=="more":
                 x = leaky_relu(self.hidden3(x))
                 x = self.dropout(x)   
             
@@ -236,7 +236,7 @@ class TransGan(pl.LightningModule):
         self.num_batches = int(num_batches)
         self.build_flow()
         self.gen_net = Gen(n_dim=self.n_dim,hidden=config["hidden"],num_layers=config["num_layers"],dropout=config["dropout"],
-                            no_hidden=config["no_hidden"],n_part=config["n_part"],l_dim=config["l_dim"],
+                            no_hidden=config["no_hidden_gen"],n_part=config["n_part"],l_dim=config["l_dim"],
                             num_heads=config["heads"],gen_mask=config["gen_mask"]).cuda()
         self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],
                             mass=self.config["mass"],num_heads=config["heads"],last_clf=config["last_clf"],n_part=config["n_part"],
@@ -322,12 +322,15 @@ class TransGan(pl.LightningModule):
         because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
         assert mask.dtype==torch.bool
         with torch.no_grad():
-            if  self.config["context_features"]:
+            if  self.config["context_features"]==1:
                 c=mask.clone()
                 c = (~c).sum(axis=1).reshape(-1,1).float()
+            elif  self.config["context_features"]==2:
+                c=mask.clone()
+                c = torch.cat(( mass(batch).reshape(-1,1),(~c).sum(axis=1).reshape(-1,1)),dim=1).float()                
             else: 
                 c=None
-            z = self.flow.sample(len(batch) if self.config["context_features"]==0 else 1,context=c.float()).reshape(len(batch), self.n_part, self.n_dim)
+            z = self.flow.sample(len(batch) if self.config["context_features"]==0 else 1,context=c).reshape(len(batch), self.n_part, self.n_dim)
         fake = z + self.gen_net(z, mask=mask)
         # fake = fake*((~mask).reshape(len(batch),30,1).float()) #somehow this gives nangrad
         fake[mask]=0
@@ -412,9 +415,12 @@ class TransGan(pl.LightningModule):
         mask = batch[:, 90:].bool()
 
         batch = batch[:, :90]
-        if  self.config["context_features"]:
-            c=mask.clone()
-            c = (~c).sum(axis=1).reshape(-1,1)
+        if  self.config["context_features"]==1:
+                c=mask.clone()
+                c = (~c).sum(axis=1).reshape(-1,1).float()
+        elif  self.config["context_features"]==2:
+                c=mask.clone()
+                c = torch.cat(( mass(batch).reshape(-1,1),(~c).sum(axis=1).reshape(-1,1)),dim=1).float()                
         else: 
             c=None
         opt_nf, opt_d, opt_g = self.optimizers()
@@ -426,10 +432,10 @@ class TransGan(pl.LightningModule):
             self.log("lr_nf", sched_nf.get_last_lr()[-1], logger=True, on_epoch=True,on_step=False)
             self.log("lr_d", sched_d.get_last_lr()[-1], logger=True, on_epoch=True,on_step=False)
 
-        if self.current_epoch < self.train_nf:
+        if self.current_epoch < self.train_nf or self.config["context_features"]==2 :
             if self.config["sched"] != None:
                 sched_nf.step()
-            nf_loss = -self.flow.to(self.device).log_prob(batch,context=c.float()).mean()
+            nf_loss = -self.flow.to(self.device).log_prob(batch,context=c).mean()
             nf_loss /= self.n_dim * self.n_part
             opt_nf.zero_grad()
             self.manual_backward(nf_loss)
@@ -500,9 +506,12 @@ class TransGan(pl.LightningModule):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
         mask = batch[:, 90:].cpu().bool()
         batch = batch[:, :90].cpu()
-        if  self.config["context_features"]:
+        if  self.config["context_features"]==1:
             c=mask.clone()
             c = (~c).sum(axis=1).reshape(-1,1).float()
+        elif  self.config["context_features"]==2:
+            c=mask.clone()
+            c = torch.cat(( mass(batch).reshape(-1,1),(~c).sum(axis=1).reshape(-1,1)),dim=1).float()                
         else: 
             c=None
         self.dis_net.train()
@@ -535,13 +544,16 @@ class TransGan(pl.LightningModule):
         
         for i in range(30):
             fake_scaled[fake_scaled[:, i,2] < 0, i,2] = 0
-            # true_scaled[true_scaled[:, i] < 0, i] = 0
+            z_scaled[z_scaled[:, i,2] < 0, i,2] = 0
         # Some metrics we track
-        cov, mmd = cov_mmd(fake_scaled, true_scaled, use_tqdm=False)
+        cov, mmd = cov_mmd( true_scaled,fake_scaled, use_tqdm=False)
+        cov_nf, mmd_nf = cov_mmd(true_scaled,z_scaled,  use_tqdm=False)
         try:
+            
             fpndv = fpnd(fake_scaled[:50000,:].numpy(), use_tqdm=False, jet_type=self.config["parton"])
         except:
             fpndv = 1000
+        
         w1m_ = w1m(fake_scaled, true_scaled)[0]
         w1p_ = w1p(fake_scaled, true_scaled)[0]
         w1efp_ = w1efp(fake_scaled, true_scaled)[0]
@@ -566,8 +578,10 @@ class TransGan(pl.LightningModule):
         self.log("val_w1efp", w1efp_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_logprob", logprob, prog_bar=True, logger=True)
         self.log("val_cov", cov, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        self.log("val_cov_nf", cov_nf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_fpnd", fpndv, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_mmd", mmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        self.log("val_mmd_nf", mmd_nf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.plot = plotting(model=self,gen=z_scaled,gen_corr=fake_scaled,true=true_scaled,config=self.config,step=self.global_step,
             logger=self.logger.experiment)
         self.plot.plot_scores(scores_real,scores_fake,train=False,step=self.global_step)

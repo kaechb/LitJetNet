@@ -106,24 +106,32 @@ if __name__ == "__main__":
         # config["no_hidden"]=np.random.choice([True,False,"more"])
         # config["no_hidden"]=config["no_hidden"]=="True" or config["no_hidden"]=="more"
 
-        config["gen_mask"]=np.random.choice([True,False])
+        config["gen_mask"]=True
         config["bullshitbingo"]=np.random.choice([True,False])
         config["bullshitbingo2"]=np.random.choice([True,False])
-        config["scalingbullshit"]=np.random.choice([True,False])
-        config["max_epochs"]=int(config["max_epochs"]*np.random.choice([1,2,3]))
+        config["scalingbullshit"]=np.random.choice([True])
+        config["max_epochs"]=int(config["max_epochs"]*np.random.choice([2,3,4]))
         config["warmup"]=np.random.choice([50,150,800,1500])
-        config["sched"]=np.random.choice(["cosine","cosine2",None])
-        config["name"]="fix_mask_scan3"
-        config["freq"]=np.random.choice([5,6,7])    # config["opt"]="Adam"
+        config["sched"]=np.random.choice(["cosine2",None])
+        config["name"]="final_cov_"
+        config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
-        config["dropout"]=np.random.choice([0.2,0.4])    
+        config["dropout"]=np.random.choice([0.1,0.2,0.3])    
         config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
-        config["lr_g"]=np.random.choice([0.0005,0.0001,0.00005])  
-        config["ratio"]=np.random.choice([0.9,1,1.3,1.5])
+        config["lr_g"]=np.random.choice([0.0003,0.0001])  
+        config["ratio"]=np.random.choice([0.9,1,1.3,])
+        config["context_features"]=np.random.choice([0,1])
+        config["l_dim"]=np.random.choice([15,25])
+        config["heads"]=np.random.choice([3,4,5])
         config["val_check"]=25
         config["lr_d"]=config["lr_g"]*config["ratio"]
-        config["context_features"]=1
+        config["l_dim"] = config["l_dim"] * config["heads"]
+        config["parton"] =np.random.choice(["q","g","t"])
+        config["name"] = config["name"]+config["parton"]
+        config["no_hidden_gen"]=np.random.choice([True,False,"more"])
+        config["no_hidden"]=np.random.choice([True,False,"more"])
         # config["num_layers"]=np.random.choice([2,3,4])    
+        config["last_clf"]=False
     else:
         config["last_clf"]=True
         config["gen_mask"]=True
