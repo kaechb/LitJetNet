@@ -136,7 +136,7 @@ if __name__ == "__main__":
         config["last_clf"]=True
         config["gen_mask"]=True
         config["warmup"]=15
-        config["name"]="fix_mask"
+        config["name"]="jetnet2"
         config["freq"]=6    # config["opt"]="Adam"
     print(config)
     if len(sys.argv) > 2:
