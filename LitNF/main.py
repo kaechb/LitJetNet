@@ -38,8 +38,8 @@ def train(config,  load_ckpt=None, i=0, root=None):
     callbacks = [
         ModelCheckpoint(
             monitor="val_fpnd",
-            save_top_k=2,
-            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}",
+            save_top_k=10,
+            filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}--{val_w1efp:.6f}",
             dirpath=root,
             every_n_epochs=10,
         )
@@ -95,14 +95,16 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    best_hparam="/beegfs/desy/user/kaechben/Transflow_best/lightning_logs/version_72/hparams.yaml"
+    parton=np.random.choice(["t","q"])
+    best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
     with open(best_hparam, 'r') as stream:
         config=yaml.load(stream,Loader=yaml.Loader)
         print(config)
         config=config["config"]
     hyperopt=True
+    config["val_check"]=50
     if hyperopt:
-        config["last_clf"]=np.random.choice([True,False])
+
         # config["no_hidden"]=np.random.choice([True,False,"more"])
         # config["no_hidden"]=config["no_hidden"]=="True" or config["no_hidden"]=="more"
 
@@ -111,18 +113,19 @@ if __name__ == "__main__":
         config["bullshitbingo2"]=np.random.choice([True,False])
         config["scalingbullshit"]=np.random.choice([True])
         config["max_epochs"]=int(config["max_epochs"]*np.random.choice([2,3,4]))
-        config["warmup"]=np.random.choice([50,150,800,1500])
+        config["warmup"]=np.random.choice([1500])
         config["sched"]=np.random.choice(["cosine2",None])
         config["name"]="final_cov_"
         config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
-        config["dropout"]=np.random.choice([0.1,0.2,0.3])    
+        config["dropout"]=np.random.choice([0.1,0.15,0.05])    
         config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
         config["lr_g"]=np.random.choice([0.0003,0.0001])  
         config["ratio"]=np.random.choice([0.9,1,1.3,])
-        config["context_features"]=np.random.choice([0,1])
-        config["l_dim"]=np.random.choice([15,25])
+        config["context_features"]=np.random.choice([0])
+        config["l_dim"]=np.random.choice([25])
         config["heads"]=np.random.choice([3,4,5])
+        config["hidden"]=np.random.choice([128,256,512])
         config["val_check"]=25
         config["lr_d"]=config["lr_g"]*config["ratio"]
         config["l_dim"] = config["l_dim"] * config["heads"]
@@ -133,11 +136,11 @@ if __name__ == "__main__":
         # config["num_layers"]=np.random.choice([2,3,4])    
         config["last_clf"]=False
     else:
-        config["last_clf"]=True
-        config["gen_mask"]=True
-        config["warmup"]=15
-        config["name"]="fix_mask"
-        config["freq"]=6    # config["opt"]="Adam"
+        # config["last_clf"]=True
+        # config["gen_mask"]=True
+        
+        config["name"]="bestever_"+parton#config["parton"]
+        #config["freq"]=6    # config["opt"]="Adam"
     print(config)
     if len(sys.argv) > 2:
         root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/"+config["parton"]+"_" +"run"+sys.argv[1]+"_"+str(sys.argv[2])
