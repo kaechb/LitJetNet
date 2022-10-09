@@ -111,7 +111,7 @@
 
 #     def val_dataloader(self):
 #         return DataLoader(self.test_set, batch_size=len(self.test_set))
-import jetnet
+import torch
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl   
 from sklearn.model_selection import train_test_split
@@ -163,41 +163,32 @@ class JetNetDataloader(pl.LightningDataModule):
         super().__init__()
         self.config=config
         self.n_dim=config["n_dim"]
-
         self.batch_size=config["batch_size"]
+        self.p=config["p"]
     def setup(self,stage):
     # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
     # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        # data_dir=os.environ["HOME"]+"/JetNet_NF/train_{}_jets.csv".format(self.config["parton"])
-        # data=pd.read_csv(data_dir,sep=" ",header=None)
-        # jets=[]
-        # limit=int(self.config["limit"]*1.1)
-        # for njets in range(1,31):
-        #     masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
-        #     df=data.loc[masks==njets,:]
-        #     df=df.drop(np.arange(3,120,4),axis=1)
-        #     df["n"]=njets
-        #     if len(df)>100:
-        #         jets.append(df[:self.config["limit"]])
-        # #stacking together differnet samples with different number particles per jet
-        # self.n=torch.empty((0,1))
-        # self.data=torch.empty((0,90))
-        # for i in range(len(jets)):
-        #     x=torch.tensor(jets[i].values[:,:self.n_dim]).float()
-        #     n=torch.tensor(jets[i]["n"].values).float()
-        #     self.data=torch.vstack((self.data,x))
-        #     self.n=torch.vstack((self.n.reshape(-1,1),n.reshape(-1,1)))        
-        data=jetnet.datasets.JetNet(self.config["parton"],normalize=False,train=True).data.float() 
-        test_set=jetnet.datasets.JetNet(self.config["parton"],normalize=False,train=False).data.float()
-        self.data=torch.cat((data,test_set),dim=0)
+        data_dir=os.environ["HOME"]+"/JetNet_NF/train_{}_jets.csv".format(self.config["parton"])
+        data=pd.read_csv(data_dir,sep=" ",header=None)
+        jets=[]
+        limit=int(self.config["limit"]*1.1)
+        for njets in range(1,31):
+            masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
+            df=data.loc[masks==njets,:]
+            df=df.drop(np.arange(3,120,4),axis=1)
+            df["n"]=njets
+            if len(df)>100:
+                jets.append(df[:self.config["limit"]])
+        #stacking together differnet samples with different number particles per jet
+        self.n=torch.empty((0,1))
+        self.data=torch.empty((0,self.p*3))
         
-        # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
-        masks = self.data[:,:,-1].bool()
-        self.data=self.data[:,:,:-1].reshape(-1,90)
-        self.n = masks.sum(axis=1).reshape(-1,1)
+        for i in range(len(jets)):
+            x=torch.tensor(jets[i].values[:,:self.n_dim]).float()
+            n=torch.tensor(jets[i]["n"].values).float()
+            self.data=torch.vstack((self.data,x))
+            self.n=torch.vstack((self.n.reshape(-1,1),n.reshape(-1,1)))        
         
-        # masks = ~masks
-
         if self.config["canonical"]:
             self.data=preprocess(self.data)        
         # calculating mass per jet
@@ -206,25 +197,19 @@ class JetNetDataloader(pl.LightningDataModule):
         for i in torch.unique(self.n):
             i=int(i)
             self.data[self.data[:,-1]==i,3*i:90]=torch.normal(mean=torch.zeros_like(self.data[self.data[:,-1]==i,3*i:90]),std=1).abs()*1e-7
-
         #standard scaling 
         self.scaler=StandardScaler()
-        self.data=torch.hstack((self.data,self.m))        
+        self.data=torch.hstack((self.data[:,:self.p*3],self.m))        
         self.scaler.fit(self.data)
         self.data=self.scaler.transform(self.data)
-        self.min_m=self.scaler.transform(torch.zeros((1,91)))[0,-1]
+        self.min_m=self.scaler.transform(torch.zeros((1,self.p*3+1)))[0,-1]
         self.data=torch.hstack((self.data,self.n))
         
         #calculating mass dist in different bins, this is needed for the testcase where we need to generate the conditoon
         if self.config["variable"]:
             self.mdists={}
-            
             for i in torch.unique(self.n):
-                if len(self.data[self.n[:,0]==i])==1:
-                    
-                    self.mdists[int(i)]=[lambda x:self.data[self.n[:,0]==i,-2],lambda x:self.data[self.n[:,0]==i,-2]]
-                else:
-                    self.mdists[int(i)]=F(self.data[self.n[:,0]==i,-2])    
+                self.mdists[int(i)]=F(self.data[self.n[:,0]==i,-2])    
         self.data,self.test_set=train_test_split(self.data.cpu().numpy(),test_size=0.3)
         self.n_train=self.data[:,-1]
         self.n_test=self.test_set[:,-1]
@@ -232,7 +217,7 @@ class JetNetDataloader(pl.LightningDataModule):
             
         self.test_set=torch.tensor(self.test_set).float()
         self.data=torch.tensor(self.data).float()
-        assert self.data.shape[1]==92
+
         assert (torch.isnan(self.data)).sum()==0
 
     def train_dataloader(self):

@@ -212,6 +212,7 @@ class LitNF(pl.LightningModule):
      
     def _summary(self,temp):
             first=False
+            
             self.summary_path="/beegfs/desy/user/{}/{}/summary.csv".format(os.environ["USER"],self.config["name"])
             if self.global_step==0:
                 self.start=time.time()
@@ -225,8 +226,11 @@ class LitNF(pl.LightningModule):
                 
             summary.loc[self.logger.log_dir,self.config.keys()]=self.config.values()
             summary.loc[self.logger.log_dir,temp.keys()]=temp.values()
-            summary.loc[self.logger.log_dir,"time"]=time.time()-self.start          
-            summary.to_csv(self.summary_path,index_label=["path_index"])  
+            summary.loc[self.logger.log_dir,"time"]=time.time()-self.start      
+            try:    
+                summary.to_csv(self.summary_path,index_label=["path_index"])  
+            except:
+                print("could not save summary to {}, try if it exists".format(self.summary_path))
             return summary
     
     def _results(self):
@@ -312,10 +316,6 @@ class LitNF(pl.LightningModule):
             
             gen=self.flow_test.to("cpu").sample(len(batch) if c==None else 1,c).to("cpu")
             test=self.flow_test.to("cpu").sample(len(batch) if c==None else 1, c_test).to("cpu").reshape(-1,90)
-            # if self.config["oversampling"]:
-            #     order=torch.sort(test.reshape(-1,30,3)[:,:,2],dim=1,descending=True)[1]
-            #     test=torch.gather(input=test.reshape(-1,30,3),index=order.unsqueeze(-1).repeat(1,1,3),dim=1).reshape(-1,90)
-            #test=test.reshape(-1,30,3)[order.repeat(1,1,3)].reshape(-1,90)
             gen=torch.hstack((gen[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(gen)).unsqueeze(1)))                
             test=torch.hstack((test[:,:self.n_dim].cpu().detach().reshape(-1,self.n_dim),torch.ones(len(test)).unsqueeze(1)))
         # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
@@ -330,9 +330,6 @@ class LitNF(pl.LightningModule):
                 test[c_test[:,-1]==i,3*i:-1]=0
         #This is just a nice check to see whether we overtrain 
         logprob = -self.flow.to("cpu").log_prob(batch[:,:self.n_dim],c     ).detach().mean().numpy()/self.n_dim
-        # if self.global_step > 100:
-        #     if logprob > 1: ###Cut off logprob value
-        #         raise ValueError('Logprob over 1')
         #calculate mass distrbutions & concat them to training sample
         m_t=mass(true[:,:self.n_dim].to(self.device),self.config["canonical"]).cpu()
         m_gen=mass(gen[:,:self.n_dim],self.config["canonical"]).cpu()
@@ -371,7 +368,6 @@ class LitNF(pl.LightningModule):
         if self.hyperopt:
             self._results()
             summary=self._summary(temp)
-
         self.log("val_w1m",self.metrics["val_w1m"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1p",self.metrics["val_w1p"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1efp",self.metrics["val_w1efp"][-1][0],on_step=False, on_epoch=True, prog_bar=True, logger=True)
@@ -381,7 +377,6 @@ class LitNF(pl.LightningModule):
         self.log("val_mmd",mmd,prog_bar=True,logger=True,on_step=False, on_epoch=True)
         self.log("val_mse",mse,prog_bar=True,logger=True,on_step=False, on_epoch=True)
         # This part here adds the plots to tensorboard
-        
         self.plot=plotting(model=self,gen=test[:,:self.n_dim],true=true[:,:self.n_dim],config=self.config,step=self.global_step,logger=self.logger.experiment)
         self.flow=self.flow.to(self.device)
         try:
@@ -395,4 +390,3 @@ class LitNF(pl.LightningModule):
             
 # #         self.flow.to("cuda")
         self.plot.plot_correlations()
-

@@ -12,7 +12,6 @@ import pandas as pd
 import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 font = {'family' : 'normal',
-        'weight' : 'bold',
         'size'   : 12}
 
 matplotlib.rc('font', **font)
@@ -127,19 +126,19 @@ class plotting():
 
 
         gen=self.gen[:,:self.n_dim].reshape(-1,3).numpy()
-        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m_T^{rel}$"]):
+        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m^{rel}$"]):
             
             if v!="m":
-                a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
-                b=max(np.quantile(self.gen[:,i],0.999),np.quantile(self.test_set[:,i],0.999))     
+                a=np.quantile(self.test_set[:,i],0.001)
+                b=np.quantile(self.test_set[:,i],0.999)
                 h=hist.Hist(hist.axis.Regular(bins,a,b))
                 h2=hist.Hist(hist.axis.Regular(bins,a,b))
                 h.fill(self.gen[:,i])
                 h2.fill(self.test_set[:,i])
                 i+=1
             else:
-                a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
-                b=max(np.quantile(m_t,0.999),np.quantile(m,0.999))
+                a=np.quantile(m_t,0.001)
+                b=np.quantile(m_t,0.999)
                 h=hist.Hist(hist.axis.Regular(bins,a,b))
                 h2=hist.Hist(hist.axis.Regular(bins,a,b))
                 bins = h.axes[0].edges
@@ -198,7 +197,7 @@ class plotting():
         hep.cms.label("Private Work",data=None,lumi=None,year=None)
         plt.xlabel('step')
         plt.ylabel('loss')
-        ln1=plt.plot(self.model.logprobs,label='log$(p_{gauss}(x_{data}))$')
+        ln1=plt.plot(self.model.logprobs,label='logprob')
         if "calc_massloss" in self.config.keys() and self.config["calc_massloss"]:
             plt.twinx()
             ln2=plt.plot(self.model.mlosses,label=r'mass mse $\times$ {}'.format(self.config["lambda"]),color='orange')
