@@ -14,7 +14,11 @@ from pytorch_lightning.tuner.tuning import Tuner
 from scipy import stats
 from torch.nn import functional as FF
 from helpers import *
-from jetnet_dataloader import JetNetDataloader
+if True:
+    from jetnet_dataloader import JetNetDataloader
+
+else:
+    from jetnet_dataloader import JetNetDataloader
 from lit_nf import TransGan
 from plotting import plotting
 import yaml
@@ -112,10 +116,10 @@ if __name__ == "__main__":
         config["bullshitbingo"]=np.random.choice([True,False])
         config["bullshitbingo2"]=np.random.choice([True,False])
         config["scalingbullshit"]=np.random.choice([True])
-        config["max_epochs"]=int(config["max_epochs"]*np.random.choice([2,3,4]))
+        config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
         config["warmup"]=np.random.choice([1500])
         config["sched"]=np.random.choice(["cosine2",None])
-        config["name"]="final_cov_"
+
         config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
         config["dropout"]=np.random.choice([0.1,0.15,0.05])    
@@ -134,6 +138,7 @@ if __name__ == "__main__":
         config["no_hidden_gen"]=np.random.choice([True,False,"more"])
         config["no_hidden"]=np.random.choice([True,False,"more"])
         # config["num_layers"]=np.random.choice([2,3,4])    
+        config["name"]="bestever_"+parton
         config["last_clf"]=False
     else:
         # config["last_clf"]=True
