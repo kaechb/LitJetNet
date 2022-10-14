@@ -187,8 +187,8 @@ class JetNetDataloader(pl.LightningDataModule):
         #     n=torch.tensor(jets[i]["n"].values).float()
         #     self.data=torch.vstack((self.data,x))
         #     self.n=torch.vstack((self.n.reshape(-1,1),n.reshape(-1,1)))        
-        data=jetnet.datasets.JetNet(self.config["parton"],normalize=False,train=True).data.float() 
-        test_set=jetnet.datasets.JetNet(self.config["parton"],normalize=False,train=False).data.float()
+        data=jetnet.datasets.JetNet(self.config["parton"],normalize=False,train=True,data_dir="/beegfs/desy/user/kaechben/datasets/").data.float() 
+        test_set=jetnet.datasets.JetNet(self.config["parton"],normalize=False,train=False,data_dir="/beegfs/desy/user/kaechben/datasets").data.float()
         self.data=torch.cat((data,test_set),dim=0)
         
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
