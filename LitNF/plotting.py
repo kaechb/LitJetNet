@@ -128,10 +128,9 @@ class plotting:
     ):
         self.config = model.config
         self.n_dim = self.config["n_dim"]
-        self.n_part = self.config["n_part"]
-        self.gen = gen.numpy().reshape(len(gen),int(self.n_dim*self.n_part))
-        self.gen_corr = gen_corr.numpy().reshape(len(gen_corr),int(self.n_dim*self.n_part))
-        self.test_set = true.numpy().reshape(len(true),int(self.n_dim*self.n_part))
+        self.gen = gen.numpy().reshape(len(gen),90)
+        self.gen_corr = gen_corr.numpy().reshape(len(gen_corr),90)
+        self.test_set = true.numpy().reshape(len(true),90)
         self.step = step
         self.model = model
         if logger is not None:
@@ -278,8 +277,8 @@ class plotting:
             c = 1
         else:
             c = 0.25
-        df_g = pd.DataFrame(self.gen[:, : self.n_dim][:, range(i, int(self.n_dim*self.n_part), 3)])
-        df_h = pd.DataFrame(self.test_set[:, : self.n_dim][:, range(i, int(self.n_dim*self.n_part), 3)])
+        df_g = pd.DataFrame(self.gen[:, : self.n_dim][:, range(i, 90, 3)])
+        df_h = pd.DataFrame(self.test_set[:, : self.n_dim][:, range(i, 90, 3)])
 
         fig, ax = plt.subplots(ncols=2, figsize=(15, 7.5))
         corr_g = ax[0].matshow(df_g.corr())
