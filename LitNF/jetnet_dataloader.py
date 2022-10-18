@@ -67,10 +67,10 @@ class JetNetDataloader(pl.LightningDataModule):
     def setup(self, stage):
         # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        data=jetnet.datasets.JetNet(
-            self.config["parton"],normalize=False,train=True,data_dir="/beegfs/desy/user/kaechben/datasets/").data.float() 
-        test_set=jetnet.datasets.JetNet(
-            self.config["parton"],normalize=False,train=False,data_dir="/beegfs/desy/user/kaechben/datasets").data.float()
+        data,_=jetnet.datasets.JetNet.getData(jet_type=self.config["parton"],split="train",num_particles=self.n_part,data_dir="/beegfs/desy/user/kaechben/datasets")
+        test_set,_=jetnet.datasets.JetNet.getData(jet_type=self.config["parton"],split="train",num_particles=self.n_part,data_dir="/beegfs/desy/user/kaechben/datasets")
+        data=torch.tensor(data)
+        test_set=torch.tensor(test_set)
         self.data=torch.cat((data,test_set),dim=0)
         
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
