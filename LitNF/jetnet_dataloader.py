@@ -67,11 +67,13 @@ class JetNetDataloader(pl.LightningDataModule):
     def setup(self, stage):
         # This just sets up the dataloader, nothing particularly important. it reads in a csv, calculates mass and reads out the number particles per jet
         # And adds it to the dataset as variable. The only important thing is that we add noise to zero padded jets
-        data=jetnet.datasets.JetNet(
-            self.config["parton"],normalize=False,train=True,data_dir="/beegfs/desy/user/kaechben/datasets/").data.float() 
-        test_set=jetnet.datasets.JetNet(
-            self.config["parton"],normalize=False,train=False,data_dir="/beegfs/desy/user/kaechben/datasets").data.float()
-        self.data=torch.cat((data,test_set),dim=0)
+        data=torch.tensor(jetnet.datasets.JetNet.getData(jet_type=self.config["parton"],split="train",num_particles=self.n_part,data_dir="/beegfs/desy/user/kaechben/datasets")[0])
+        test_set=torch.tensor(jetnet.datasets.JetNet.getData(jet_type=self.config["parton"],split="test",num_particles=self.n_part,data_dir="/beegfs/desy/user/kaechben/datasets")[0])
+        # jetnet.datasets.JetNet(
+        #     self.config["parton"],normalize=False,train=True,data_dir="/beegfs/desy/user/kaechben/datasets/").data.float() 
+        # test_set=jetnet.datasets.JetNet(
+        #     self.config["parton"],normalize=False,train=False,data_dir="/beegfs/desy/user/kaechben/datasets").data.float()
+        self.data=torch.cat((data,test_set),dim=0).float()
         
         # masks=np.sum(data.values[:,np.arange(3,120,4)],axis=1)
         masks = self.data[:,:,-1].bool()
@@ -83,22 +85,22 @@ class JetNetDataloader(pl.LightningDataModule):
         self.scalers=[]
         
         # standard scaling
-        if self.config["scalingbullshit"]:
-                self.scaler=StandardScaler()
-                self.data=self.scaler.fit_transform(self.data)
-        else:
-            for i in range(self.n_part):
+        # if self.config["scalingbullshit"]:
+        self.scaler=StandardScaler()
+        self.data=self.scaler.fit_transform(self.data)
+        # else:
+        #     for i in range(self.n_part):
                 
-                self.scalers.append(StandardScaler())
-                if self.config["quantile"]:
-                    self.ptscalers.append(QuantileTransformer(output_distribution="normal"))
-                    self.data[:, i, :2] = self.scaler.fit_transform(self.data[:, i, :2])
-                    self.data[:, i, 2] = torch.tensor(
-                        self.ptscaler.fit_transform(self.data[:, i, 2].numpy())
-                    )        
-                else:
-                    self.data[:,i,:]=self.scalers[i].fit_transform(self.data[:,i,:])
-        self.data = self.data.reshape(len(self.data), 90)
+        #         self.scalers.append(StandardScaler())
+        #         if self.config["quantile"]:
+        #             self.ptscalers.append(QuantileTransformer(output_distribution="normal"))
+        #             self.data[:, i, :2] = self.scaler.fit_transform(self.data[:, i, :2])
+        #             self.data[:, i, 2] = torch.tensor(
+        #                 self.ptscaler.fit_transform(self.data[:, i, 2].numpy())
+        #             )        
+        #         else:
+        #             self.data[:,i,:]=self.scalers[i].fit_transform(self.data[:,i,:])
+        self.data = self.data.reshape(len(self.data), int(self.n_dim*self.n_part))
         self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data),self.n_part*self.n_dim), masks)))
         # self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
         self.test_set = self.data[-len(test_set):].float()

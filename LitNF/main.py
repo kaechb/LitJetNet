@@ -26,7 +26,7 @@ import yaml
 # from comet_ml import Experiment
 
 
-def train(config,  load_ckpt=None, i=0, root=None):
+def train(config,  load_ckpt=False, i=0, root=None):
     # This function is a wrapper for the hyperparameter optimization module called ray
     # Its parameters hyperopt and load_ckpt are there for convenience
     # Config is the only relevant parameter as it sets the trainings hyperparameters
@@ -49,12 +49,25 @@ def train(config,  load_ckpt=None, i=0, root=None):
         )
     ]
 
-    if False:  # load_ckpt:
+    if  load_ckpt:
+        best_model={}
+        best_model["q"]="/beegfs/desy/user/kaechben/bestever_q/epoch=5049-val_fpnd=0.09-val_w1m=0.0007--val_w1efp=0.000008.ckpt"
+        best_model["t"]="/beegfs/desy/user/kaechben/bestever_t/epoch=8249-val_fpnd=0.09-val_w1m=0.0007--val_w1efp=0.000011.ckpt"
+        best_model["g"]="/beegfs/desy/user/kaechben/bestever_g/epoch=3849-val_fpnd=0.07-val_w1m=0.0007--val_w1efp=0.000006.ckpt"
+        best_model["t"]="/beegfs/desy/user/kaechben/bestever_t/epoch=5199-val_fpnd=0.06-val_w1m=0.0009--val_w1efp=0.000011.ckpt"
+        best_model["w"]="/beegfs/desy/user/kaechben/part_30w/epoch=449-val_fpnd=1000.00-val_w1m=0.0007--val_w1efp=0.000013.ckpt"
         model = TransGan.load_from_checkpoint(
-            "/beegfs/desy/user/kaechben/Transflow_reloaded2/2022_08_08-18_02-08/epoch=239-val_logprob=0.47-val_w1m=0.0014.ckpt"
+            best_model[config["parton"]]
         )
-        model.data_module = data_module
 
+        model.data_module = data_module
+    # model.config["lr_g"]*=np.random.choice([0.01,0.001])
+    # model.config["lr_d"]*=np.random.choice([0.01,0.001])
+    # model.config["freq"]=1
+    # model.config["sched"]="cosine"
+    config=model.config
+    
+    # config["wgan"]="gan"
     # pl.seed_everything(model.config["seed"], workers=True)
     # model.config["freq"]=20
     # model.config["lr_g"]=0.00001
@@ -77,6 +90,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
         num_sanity_val_steps=1,  # gradient_clip_val=.02, 
         fast_dev_run=False,
         default_root_dir=root,
+        precision=32
     )
     # This calls the fit function which trains the model
 
@@ -99,13 +113,14 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    parton=np.random.choice(["t","q"])
-    best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
+    # parton=np.random.choice(["t","q"])
+    best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format("t")
     with open(best_hparam, 'r') as stream:
         config=yaml.load(stream,Loader=yaml.Loader)
         print(config)
         config=config["config"]
     hyperopt=True
+
     config["val_check"]=50
     if hyperopt:
 
@@ -115,17 +130,17 @@ if __name__ == "__main__":
         config["gen_mask"]=True
         config["bullshitbingo"]=np.random.choice([True,False])
         config["bullshitbingo2"]=np.random.choice([True,False])
-        config["scalingbullshit"]=np.random.choice([True])
+
         config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
         config["warmup"]=np.random.choice([1500])
         config["sched"]=np.random.choice(["cosine2",None])
 
         config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
-        config["dropout"]=np.random.choice([0.1,0.15,0.05])    
+        config["dropout"]=np.random.choice([0.1])    
         config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
-        config["lr_g"]=np.random.choice([0.0003,0.0001])  
-        config["ratio"]=np.random.choice([0.9,1,1.3,])
+        config["lr_g"]=np.random.choice([0.0003,0.0001]) 
+        config["ratio"]=np.random.choice([0.9,1,1.1,])
         config["context_features"]=np.random.choice([0])
         config["l_dim"]=np.random.choice([25])
         config["heads"]=np.random.choice([3,4,5])
@@ -133,19 +148,24 @@ if __name__ == "__main__":
         config["val_check"]=25
         config["lr_d"]=config["lr_g"]*config["ratio"]
         config["l_dim"] = config["l_dim"] * config["heads"]
-        config["parton"] =np.random.choice(["q","g","t"])
+        config["n_part"] = 30
+        config["momentum"]=np.random.choice([True,False])
+        config["parton"] =np.random.choice(["t","q","g"])
         config["name"] = config["name"]+config["parton"]
         config["no_hidden_gen"]=np.random.choice([True,False,"more"])
-        config["no_hidden"]=np.random.choice([True,False,"more"])
+        config["no_hidden"]=np.random.choice([False,"more"])
+        config["name"]="part_"+str(config["n_part"])+config["parton"]
+
+        config["name"]="Ml4jets_"+str(config["n_part"])+config["parton"]
+
         # config["num_layers"]=np.random.choice([2,3,4])    
-        config["name"]="bestever_"+parton
         config["last_clf"]=False
     else:
         # config["last_clf"]=True
         # config["gen_mask"]=True
         
-        config["name"]="bestever_"+parton#config["parton"]
-        #config["freq"]=6    # config["opt"]="Adam"
+        # config["name"]="bestever_"+parton#config["parton"]
+        config["freq"]=6    # config["opt"]="Adam"
     print(config)
     if len(sys.argv) > 2:
         root = "/beegfs/desy/user/"+ os.environ["USER"]+"/"+config["name"]+"/"+config["parton"]+"_" +"run"+sys.argv[1]+"_"+str(sys.argv[2])
@@ -155,5 +175,5 @@ if __name__ == "__main__":
         for col in cols:
             print('"' + col + '":' + str(config[col]))
 
-        train(config, root=root)
+        train(config, root=root,load_ckpt=False)
    

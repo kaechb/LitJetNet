@@ -23,66 +23,48 @@ import torch.autograd as autograd
 from torch import Tensor
 from helpers import CosineWarmupScheduler
 from plotting import *
+from performer_pytorch import SelfAttention
+import copy
 
-class TransformerEncoderLayer2(torch.nn.TransformerEncoderLayer):
-    def __init__(self):
-        super(TransformerEncoderLayer2,self).__init__()
-    def forward(self, src: Tensor, src_mask= None,src_key_padding_mask = None):
-        if (src.dim() == 3 and not self.norm_first and not self.training and
-            self.self_attn.batch_first and
-            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
-            self.norm1.eps == self.norm2.eps and
-            src_mask is None and
-                not (src.is_nested and src_key_padding_mask is not None)):
-            tensor_args = (
-                src,
-                self.self_attn.in_proj_weight,
-                self.self_attn.in_proj_bias,
-                self.self_attn.out_proj.weight,
-                self.self_attn.out_proj.bias,
-                self.norm1.weight,
-                self.norm1.bias,
-                self.norm2.weight,
-                self.norm2.bias,
-                self.linear1.weight,
-                self.linear1.bias,
-                self.linear2.weight,
-                self.linear2.bias,
-            )
-            if (not torch.overrides.has_torch_function(tensor_args) and
-                    # We have to use a list comprehension here because TorchScript
-                    # doesn't support generator expressions.
-                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
-                    (not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]))):
-                return torch._transformer_encoder_layer_fwd(
-                    src,
-                    self.self_attn.embed_dim,
-                    self.self_attn.num_heads,
-                    self.self_attn.in_proj_weight,
-                    self.self_attn.in_proj_bias,
-                    self.self_attn.out_proj.weight,
-                    self.self_attn.out_proj.bias,
-                    self.activation_relu_or_gelu == 2,
-                    False,  # norm_first, currently not supported
-                    self.norm1.eps,
-                    self.norm1.weight,
-                    self.norm1.bias,
-                    self.norm2.weight,
-                    self.norm2.bias,
-                    self.linear1.weight,
-                    self.linear1.bias,
-                    self.linear2.weight,
-                    self.linear2.bias,
-                    src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
-                )
-        x = src
-        if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
-            x = x + self._ff_block(self.norm2(x))
-        else:
-            x = self.norm1( self._sa_block(x, src_mask, src_key_padding_mask))
-            x = self.norm2( self._ff_block(x))
+class FeedForward(nn.Module):
+    def __init__(self, d_model, d_ff=2048, dropout = 0.1):
+        super().__init__() 
+        # We set d_ff as a default to 2048
+        self.linear_1 = nn.Linear(d_model, d_ff)
+        self.dropout = nn.Dropout(dropout)
+        self.linear_2 = nn.Linear(d_ff, d_model)
+    def forward(self, x):
+        x = self.dropout(F.relu(self.linear_1(x)))
+        x = self.linear_2(x)
         return x
+class EncoderLayer(nn.Module):
+    def __init__(self, d_model, heads, dropout = 0.1):
+        super().__init__()
+        self.norm_1 = nn.LayerNorm(d_model)
+        self.norm_2 = nn.LayerNorm(d_model)
+        self.attn = SelfAttention(heads, d_model)
+        self.ff = FeedForward(d_model)
+        self.dropout_1 = nn.Dropout(dropout)
+        self.dropout_2 = nn.Dropout(dropout)
+        
+    def forward(self, x, mask):
+        x2 = self.norm_1(x)
+        x = x + self.dropout_1(self.attn(x2,x2,x2,mask))
+        x2 = self.norm_2(x)
+        x = x + self.dropout_2(self.ff(x2))
+        return x
+def get_clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+class Encoder(nn.Module):
+    def __init__(self, d_model, N, heads):
+        super().__init__()
+        self.N = N
+        self.layers = get_clones(EncoderLayer(d_model, heads), N)
+        self.norm = nn.LayerNorm(d_model)
+    def forward(self, x, src_key_padding_mask):
+        for i in range(N):
+            x = self.layers[i](x, src_key_padding_mask)
+        return self.norm(x)   
 
 class Gen(nn.Module):
     def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=5,dropout=0.5,gen_mask=True,no_hidden=True):
@@ -96,18 +78,21 @@ class Gen(nn.Module):
 
         
         self.embbed = nn.Linear(n_dim, l_dim)
-        self.encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=l_dim,
-                nhead=num_heads,
-                batch_first=True,
-                norm_first=False,
-                dim_feedforward=hidden,
-                dropout=dropout,
-                activation= "relu"
-            ),
-            num_layers=num_layers,
-        )
+        if False:
+            self.encoder=Encoder(self.hidden_nodes)
+        else:
+            self.encoder = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    d_model=l_dim,
+                    nhead=num_heads,
+                    batch_first=True,
+                    norm_first=False,
+                    dim_feedforward=hidden,
+                    dropout=dropout,
+                    activation= "relu"
+                ),
+                num_layers=num_layers,
+            )
         if not self.no_hidden_gen==True:
             self.hidden = nn.Linear(l_dim, hidden)
             self.hidden2 = nn.Linear(hidden, hidden)
@@ -123,7 +108,9 @@ class Gen(nn.Module):
         if not self.gen_mask:
             mask = None
         x = self.embbed(x)
+
         x = self.encoder(x, src_key_padding_mask=mask,)#attention_mask.bool()
+
         if self.no_hidden_gen==True:
             x = leaky_relu(x)
             x = self.out2(x)
@@ -141,7 +128,7 @@ class Gen(nn.Module):
 
 
 class Disc(nn.Module):
-    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=2,last_clf = True,dropout=0.5,mass=False,clf=False,bullshitbingo=True):
+    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=2,last_clf = True, momentum=False,dropout=0.5,mass=False,clf=False,bullshitbingo=True):
         super().__init__()
         self.hidden_nodes = hidden
         self.n_dim = n_dim
@@ -157,13 +144,14 @@ class Disc(nn.Module):
                                         norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True),
             num_layers=num_layers,
         )
+
         self.encoder_class=TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,
-                                        norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True)
-        self.hidden = nn.Linear(l_dim + int(mass), 2 * hidden)
+                                            norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True)
+        self.hidden = nn.Linear(l_dim + int(mass)+int(momentum), 2 * hidden)
         self.hidden2 = nn.Linear(2 * hidden, hidden)
         self.out = nn.Linear(hidden, 1)
 
-    def forward(self, x, m=None, mask=None):
+    def forward(self, x, m=None, p=None, mask=None):
         x = self.embbed(x)
         if self.clf:
             if not self.last_clf:
@@ -187,6 +175,9 @@ class Disc(nn.Module):
             x = torch.sum(x, axis=1)
         if m is not None:
             x = torch.concat((m.reshape(len(x), 1), x), axis=1)
+        if p is not None:
+            x = torch.concat((p.reshape(len(x), 1), x), axis=1)
+
         x = leaky_relu(self.hidden(x), 0.2)
         x = leaky_relu(self.hidden2(x), 0.2)
         x = self.out(x)
@@ -222,7 +213,7 @@ class TransGan(pl.LightningModule):
         self.config = config
         self.automatic_optimization = False
         self.freq_d = config["freq"]
-        self.wgan = config["wgan"]
+        #self.wgan =np.random.choice(["gan",False]) #config["wgan"]
         # Loss function of the Normalizing flows
         self.logprobs = []
         self.n_part = config["n_part"]
@@ -233,6 +224,8 @@ class TransGan(pl.LightningModule):
         self.n_dim = self.config["n_dim"]
         self.n_part = config["n_part"]
         self.alpha = 1
+
+        self.wgan=False
         self.num_batches = int(num_batches)
         self.build_flow()
         self.gen_net = Gen(n_dim=self.n_dim,hidden=config["hidden"],num_layers=config["num_layers"],dropout=config["dropout"],
@@ -240,7 +233,8 @@ class TransGan(pl.LightningModule):
                             num_heads=config["heads"],gen_mask=config["gen_mask"]).cuda()
         self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],
                             mass=self.config["mass"],num_heads=config["heads"],last_clf=config["last_clf"],n_part=config["n_part"],
-                            dropout=config["dropout"],clf=config["clf"],bullshitbingo=config["bullshitbingo"]).cuda()
+                            dropout=config["dropout"],clf=config["clf"],bullshitbingo=config["bullshitbingo"],
+                            momentum=config["momentum"]).cuda()
         self.sig = nn.Sigmoid()
         self.df = pd.DataFrame()
         for p in self.dis_net.parameters():
@@ -251,6 +245,7 @@ class TransGan(pl.LightningModule):
             if p.dim() > 1:
                 nn.init.xavier_normal(p)
         self.train_nf = config["max_epochs"] // config["frac_pretrain"]
+        self.criterion=torch.nn.BCEWithLogitsLoss()
 
     def load_datamodule(self, data_module):
         """needed for lightning training to work, it just sets the dataloader for training and validation"""
@@ -296,7 +291,7 @@ class TransGan(pl.LightningModule):
         n, counts = np.unique(self.data_module.n, return_counts=True)
         counts_prob = torch.tensor(counts / len(self.data_module.n) )
         n_test=n[torch.multinomial(counts_prob,replacement=True,num_samples=(len(mask)))] 
-        indices = torch.arange(30, device=mask.device)
+        indices = torch.arange(self.n_part, device=mask.device)
         mask_test = (indices.view(1, -1) < torch.tensor(n_test).view(-1, 1))      
         mask_test=~mask_test.bool()
         return (mask_test)
@@ -412,9 +407,9 @@ class TransGan(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         """training loop of the model, here all the data is passed forward to a gaussian
         This is the important part what is happening here. This is all the training we do"""
-        mask = batch[:, 90:].bool()
+        mask = batch[:, int(self.n_dim*self.n_part):].bool()
 
-        batch = batch[:, :90]
+        batch = batch[:, :int(self.n_dim*self.n_part)]
         if  self.config["context_features"]==1:
                 c=mask.clone()
                 c = (~c).sum(axis=1).reshape(-1,1).float()
@@ -442,28 +437,44 @@ class TransGan(pl.LightningModule):
             opt_nf.step()
             self.log("logprob", nf_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
         ### GAN PART
-        if self.current_epoch >= self.train_nf / 2 or self.global_step == 1:
+        if True:#self.current_epoch >= self.train_nf / 2 or self.global_step == 1:
             if self.config["sched"] != None:
                 sched_d.step()
             batch = batch.reshape(len(batch), self.n_part, self.n_dim)
             # batch = batch*((~mask).reshape(-1,30,1).int())
             batch[mask]=0
             fake = self.sampleandscale(batch, mask, scale=False)
+            c_t=[None,None]
+            c_f=[None,None]
+
             if self.config["mass"]:
-                m_t = mass(batch,self.config["canonical"],)
-                m_f = mass(fake,self.config["canonical"],)
-            pred_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=mask)
-            pred_fake = self.dis_net(fake.detach(), None if not self.config["mass"] else m_f.detach(), mask=mask)
+                c_t[0] = mass(batch,self.config["canonical"],)
+                c_f[0] = mass(fake,self.config["canonical"],).detach()
+            if self.config["momentum"]:
+                c_t[1] = batch[:,:,2].sum(-1)
+                c_f[1] = fake[:,:,2].sum(-1).detach()
+            
+            pred_real = self.dis_net(batch, m=c_t[0],p=c_t[1], mask=mask)
+            pred_fake = self.dis_net(fake.detach(), m=c_t[0], p=c_t[1], mask=mask)
             if self.wgan:
-                # gradient_penalty = self.compute_gradient_penalty(self.dis_net, batch, fake.detach(), mask, 1)
-                gradient_penalty = self.compute_gradient_penalty2(batch, fake.detach(), pred_real, pred_fake,None)
-                self.log("gradient penalty", gradient_penalty, logger=True)
-                d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1)) + gradient_penalty
+                # if self.wgan=="gan":
+                    target_real = torch.ones_like(pred_real)
+                    target_fake = torch.zeros_like(pred_fake)
+                    pred = torch.vstack((pred_real, pred_fake))
+                    target = torch.vstack((target_real, target_fake))
+                    d_loss = self.criterion(pred, target).mean()
+                # else:
+                #     # gradient_penalty = self.compute_gradient_penalty(self.dis_net, batch, fake.detach(), mask, 1)
+                #     gradient_penalty = self.compute_gradient_penalty2(batch, fake.detach(), pred_real, pred_fake,None)
+                #     self.log("gradient penalty", gradient_penalty, logger=True)
+                #     d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1)) + gradient_penalty
+            
             else:
                 target_real = torch.ones_like(pred_real)
                 target_fake = torch.zeros_like(pred_fake)
                 pred = torch.vstack((pred_real, pred_fake))
                 target = torch.vstack((target_real, target_fake))
+                
                 d_loss = nn.MSELoss()(pred, target).mean()
             opt_d.zero_grad()
             self.manual_backward(d_loss)
@@ -477,16 +488,28 @@ class TransGan(pl.LightningModule):
                 print("passed test disc")
             # self.logger.experiment.add_scalars("d_losses",{"train_disc":d_loss_avg},global_step=self.global_step)
 
-        if (self.current_epoch > self.train_nf and self.global_step % self.freq_d < 2) or self.global_step <= 3:
+        if (self.current_epoch > self.train_nf/2 and self.global_step % self.freq_d < 2) or self.global_step <= 3:
             opt_g.zero_grad()
             fake = self.sampleandscale(batch, mask, scale=False)#~(mask.bool())
-            m_f = mass(fake,self.config["canonical"],)
-            pred_fake = self.dis_net(fake, None if not self.config["mass"] else m_f, mask=mask)#mask)
+            c_f=[None,None]
+
+            if self.config["mass"]:
+                c_f[0] = mass(fake,self.config["canonical"],).detach()
+            if self.config["momentum"]:
+                c_f[1] = fake[:,:,2].sum(-1).detach()
+            pred_fake = self.dis_net(fake, m=c_f[0],p=c_f[1], mask=mask)#mask)
             target_real = torch.ones_like(pred_fake)
             if self.wgan:
-                g_loss = -torch.mean(pred_fake.view(-1))
+                # if self.wgan=="gan":
+                    g_loss = self.criterion(pred_fake, target_real)
+                # else:
+                #     g_loss = -torch.mean(pred_fake.view(-1))
+            
+
             else:
-                g_loss = nn.MSELoss()((pred_fake.view(-1)), target_real.view(-1))
+               
+                    g_loss = nn.MSELoss()(pred_fake.view(-1), target_real.view(-1))
+                
             self.manual_backward(g_loss)
             if self.global_step > 10:
                 opt_g.step()
@@ -504,8 +527,8 @@ class TransGan(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
-        mask = batch[:, 90:].cpu().bool()
-        batch = batch[:, :90].cpu()
+        mask = batch[:, int(self.n_dim*self.n_part):].cpu().bool()
+        batch = batch[:, :int(self.n_dim*self.n_part)].cpu()
         if  self.config["context_features"]==1:
             c=mask.clone()
             c = (~c).sum(axis=1).reshape(-1,1).float()
@@ -524,16 +547,23 @@ class TransGan(pl.LightningModule):
         self.gen_net = self.gen_net.cpu()
         
         with torch.no_grad():
-            logprob = -self.flow.log_prob(batch,context=c).mean() / 90
-            batch = batch.reshape(len(batch),30,3)
+            logprob = -self.flow.log_prob(batch,context=c).mean() / int(self.n_dim*self.n_part)
+            batch = batch.reshape(len(batch),self.n_part,self.n_dim)
             gen, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch,mask_test, scale=True)#mask_test
             batch[mask]=0
+            c_t=[None,None]
+            c_f=[None,None]
+
             if self.config["mass"]:
-                m_t = mass(batch, self.config["canonical"])
-                m_f = mass(gen, self.config["canonical"])
-            scores_fake = self.dis_net(gen, None if not self.config["mass"] else m_f, mask=mask_test)
-            scores_real = self.dis_net(batch, None if not self.config["mass"] else m_t, mask=mask)
-        
+                c_t[0] = mass(batch,self.config["canonical"],)
+                c_f[0] = mass(gen,self.config["canonical"],)
+            if self.config["momentum"]:
+                c_t[1] = batch[:,:,2].sum(-1)
+                c_f[1] = gen[:,:,2].sum(-1)
+            
+
+            scores_fake = self.dis_net(gen,m=c_t[0],p=c_t[1], mask=mask_test)
+            scores_real = self.dis_net(batch, m=c_t[0],p=c_t[1], mask=mask) 
         true_scaled[mask]=0
         fake_scaled[mask_test] = 0
         z_scaled[mask_test]  = 0
@@ -542,7 +572,7 @@ class TransGan(pl.LightningModule):
         m_gen = mass(z_scaled, self.config["canonical"])
         m_c = mass(fake_scaled, self.config["canonical"])
         
-        for i in range(30):
+        for i in range(self.n_part):
             fake_scaled[fake_scaled[:, i,2] < 0, i,2] = 0
             z_scaled[z_scaled[:, i,2] < 0, i,2] = 0
         # Some metrics we track
@@ -553,13 +583,21 @@ class TransGan(pl.LightningModule):
             fpndv = fpnd(fake_scaled[:50000,:].numpy(), use_tqdm=False, jet_type=self.config["parton"])
         except:
             fpndv = 1000
-        
+        if fpndv>2000:
+            print("fpnd to high stop training")
+            raise
         w1m_ = w1m(fake_scaled, true_scaled)[0]
         w1p_ = w1p(fake_scaled, true_scaled)[0]
         w1efp_ = w1efp(fake_scaled, true_scaled)[0]
+        if  w1m_ < 0.001 and fpndv<0.1 and self.current_epoch>500:
+            self.wgan=True
+            for g in self.optimizers()[1].param_groups:
+                g['lr'] *= 0.001
+            for g in self.optimizers()[2].param_groups:
+                g['lr'] *= 0.001
         self.w1ms.append(w1m_)
         self.fpnds.append(fpndv)
-        if (np.array([self.fpnds])[-4:] > 4).all() and self.current_epoch > self.config["max_epochs"]/5.4 and not self.config["bullshitbingo2"] or (np.array([self.w1ms])[-4:] > 0.006).all() and self.current_epoch > self.config["max_epochs"]/2 and not self.config["bullshitbingo2"]:
+        if (np.array([self.fpnds])[-4:] > 4).all() and self.current_epoch > self.config["max_epochs"]/5.4 and not self.config["bullshitbingo2"] and (np.array([self.w1ms])[-4:] > 0.006).all() :
             print("no convergence, stop training")
             raise
 
