@@ -116,10 +116,10 @@ if __name__ == "__main__":
         config["bullshitbingo"]=np.random.choice([True,False])
         config["bullshitbingo2"]=np.random.choice([True,False])
         config["scalingbullshit"]=np.random.choice([True])
-        config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
+        #config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
         config["warmup"]=np.random.choice([1500])
         config["sched"]=np.random.choice(["cosine2",None])
-
+        config["momentum"]=np.random.choice([True,False])
         config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
         config["dropout"]=np.random.choice([0.1,0.15,0.05])    
@@ -137,8 +137,8 @@ if __name__ == "__main__":
         config["name"] = config["name"]+config["parton"]
         config["no_hidden_gen"]=np.random.choice([True,False,"more"])
         config["no_hidden"]=np.random.choice([True,False,"more"])
-        # config["num_layers"]=np.random.choice([2,3,4])    
-        config["name"]="bestever_"+parton
+        config["max_epochs"]=np.random.choice([1200,2400])    
+        config["name"]="momentum_"+parton
         config["last_clf"]=False
     else:
         # config["last_clf"]=True

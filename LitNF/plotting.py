@@ -71,7 +71,7 @@ from torch.nn import functional as F
 import pandas as pd
 import time
 
-print("good boy")
+
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
 def mass(p, canonical=False):
     if len(p.shape)==2:
@@ -106,163 +106,278 @@ font = {"family": "normal", "weight": "bold", "size": 12}
 matplotlib.rc("font", **font)
 
 
-class plotting:
-    """This is a class that takes care of  plotting steps in the script,
-    It is initialized with the following arguments:
-    true=the simulated data, note that it needs to be scaled
-    gen= Generated data , needs to be scaled
-    step=The current step of the training, this is need for tensorboard
-    model=the model that is trained, a bit of an overkill as it is only used to access the losses
-    config=the config used for training
-    logger=The logger used for tensorboard logging"""
+class plotting():
+    '''This is a class that takes care of  plotting steps in the script,
+        It is initialized with the following arguments:
+        true=the simulated data, note that it needs to be scaled
+        gen= Generated data , needs to be scaled
+        step=The current step of the training, this is need for tensorboard
+        model=the model that is trained, a bit of an overkill as it is only used to access the losses
+        config=the config used for training
+        logger=The logger used for tensorboard logging'''
+    def __init__(self,true,gen,config,p,step=None,model=None,logger=None,weight=1):
+        self.config=model.config
+        self.n_dim=self.config["n_dim"]
+        self.gen=gen
+        self.test_set=true
+        self.step=step
+        self.model=model
+        self.p=p
+        self.n_part=config["n_part"]
 
-    def __init__(
-        self,
-        true,
-        gen,
-        gen_corr,
-        config,
-        step,
-        model=None,
-        logger=None,
-    ):
-        self.config = model.config
-        self.n_dim = self.config["n_dim"]
-        self.gen = gen.numpy().reshape(len(gen),90)
-        self.gen_corr = gen_corr.numpy().reshape(len(gen_corr),90)
-        self.test_set = true.numpy().reshape(len(true),90)
-        self.step = step
-        self.model = model
+        self.n_dim=config["n_dim"]
+        self.weight=weight
         if logger is not None:
-            self.summary = logger
+            self.summary=logger
+    def plot_mass_only(self,m,m_t,bins=15):
+        fig,ax=plt.subplots(2,1,gridspec_kw={'height_ratios': [3, 1]},figsize=(6,8))
+        a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
+        b=max(np.quantile(m_t,0.999),np.quantile(m,0.999))
+        a=np.quantile(m_t,0.001)
+        b=np.quantile(m_t,0.999)
+        h=hist.Hist(hist.axis.Regular(bins,a,b))
+        h2=hist.Hist(hist.axis.Regular(bins,a,b))
+        bins = h.axes[0].edges
+        h.fill(m)#,weight=1/self.weight)
+        h2.fill(m_t)
+            
+            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
 
-    def plot_2d(self, save=False):
-        # This creates a 2D histogram of the inclusive distribution for all 3 feature combinations
-        # Inclusive means that is the distribution of pt of all particles per jet and sample
-        # if save, the histograms are logged to tensorboard otherwise they are shown
-        data = self.test_set[:, : self.n_dim].reshape(-1, 3)
-        gen = self.gen[:, : self.n_dim].reshape(-1, 3)
-        labels = [r"$\eta^{rel}$", r"$\phi^{rel}$", r"$p_T^{rel}$"]
-        names = ["eta", "p3hi", "pt"]
-        for index in [[0, 1], [0, 2], [1, 2]]:
+        main_ax_artists, sublot_ax_arists = h.plot_ratio(
+            h2,
+            ax_dict={"main_ax":ax[0],"ratio_ax":ax[1]},
+            rp_ylabel=r"Ratio",
+            rp_num_label="Generated",
+            rp_denom_label="Ground Truth",
+            rp_uncert_draw_type="line",  # line or bar
+        )
+        ax[0].set_xlabel("")
+#                 if quantile and v=="m" and plot_vline:
+#                     ax[0,k].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile gen",hatch="/")
+#                     ax[0,k].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile train')
 
-            fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
-            _, x, y, _ = ax[0].hist2d(data[:, index[0]], data[:, index[1]], bins=30)
+        ax[1].set_ylim(0.25,2)
+        ax[0].set_xlim(a,b)
+        ax[1].set_xlabel("$m_T$",fontsize=22)
+        ax[1].set_xlim(a,b)
+        ax[0].set_ylabel("Counts" ,fontsize=18)
+        ax[1].set_ylabel("Ratio",fontsize=18)
+        plt.close()
+        # plt.savefig("{}_mass".format(self.p))
+        #plt.show()
+        
+    def plot_marginals(self,ith=None,title=None,save=None):
+        #This plots the marginal distribution for simulation and generation
+        #Note that this is the data the model sees during training as input to model in the NF
+        #This is the distribution of one of [eta,phi,pt] of one particle of the n particles per jet: for example the pt of the 3rd particle
+        #if save, the histograms are logged to tensorboard otherwise they are shown
+        
+        # plt.switch_backend('agg')
+        i=str(ith)
 
-            if index[1] == 2:
+        name,label=["eta","phi","pt"],['${{\eta}}^{{\\tt rel}}_{{{}}}$'.format(ith+1),"${{\phi}}^{{\\tt rel}}_{{{}}}$".format(ith+1),"${{p^{{\\tt rel}}_{{T,{}}}}}$".format(ith+1)]
+        fig,ax=plt.subplots(2,3,gridspec_kw={'height_ratios': [3, 1]},figsize=(18,6))
+        particles=[3*ith,3*ith+1,3*ith+2]
+        pre=""
+        if ith!=0:
+            pre=str(ith+1)+"."
+        plt.suptitle(pre+" Hardest Particle",fontweight="bold",fontsize=18)
+        k=0
+        for i in particles:
 
-                y = np.logspace(np.log(y[0]), np.log(y[-1]), len(y))
-                ax[0].hist2d(data[:, index[0]], gen[:, index[1]], bins=[x, y])
-            ax[1].hist2d(gen[:, index[0]], gen[:, index[1]], bins=[x, y])
-            plt.tight_layout(pad=2)
-            ax[0].set_xlabel(labels[index[0]])
-            ax[0].set_ylabel(labels[index[1]])
 
-            ax[0].set_title("Data")
-            ax[1].set_xlabel(labels[index[0]])
-            ax[1].set_ylabel(labels[index[1]])
+            ax_temp=ax[:,k]
+           
+            a=np.quantile(self.test_set[:,i].numpy(),0)
+            b=np.quantile(self.test_set[:,i].numpy(),1)
 
-            ax[1].set_title("Gen")
-
-            if save:
-                self.summary.add_figure(
-                    "2d{}-{}".format(names[index[0]], names[index[1]]),
-                    fig,
-                    global_step=self.step,
-                )
-
-                # self.summary.close()
-            else:
-                plt.show()
-
-    def plot_mass(
-        self, m, m_t, m_c, save=False, quantile=False, bins=15, plot_vline=True
-    ):
-        # This creates a histogram of the inclusive distributions and calculates the mass of each jet
-        # and creates a histogram of that
-        # if save, the histograms are logged to tensorboard otherwise they are shown
-        # if quantile, this also creates a histogram of a subsample of the generated data,
-        # where the mass used to condition the flow is in the first 10% percentile of the simulated mass dist
-        i = 0
-
-        for v, name in zip(
-            ["eta", "phi", "pt", "m"],
-            [r"$\eta^{rel}$", r"$\phi^{rel}$", r"$p_T^{rel}$", r"$m_T^{rel}$"],
-        ):
-
-            if v != "m":
-                a = np.quantile(self.test_set[:, i], 0.001)
-                b = np.quantile(self.test_set[:, i], 0.999)
-                h = hist.Hist(hist.axis.Regular(bins, a, b))
-                h2 = hist.Hist(hist.axis.Regular(bins, a, b))
-                h3 = hist.Hist(hist.axis.Regular(bins, a, b))
-
-                h.fill(self.test_set[:, i])
-                h2.fill(self.gen[:, i])
-                h3.fill(self.gen_corr[:, i])
-                i += 1
-            else:
-                a = np.quantile(m_t, 0.001)
-                b = np.quantile(m_t, 0.999)
-                h = hist.Hist(hist.axis.Regular(bins, a, b))
-                h2 = hist.Hist(hist.axis.Regular(bins, a, b))
-                h3 = hist.Hist(hist.axis.Regular(bins, a, b))
-                bins = h.axes[0].edges
-                h.fill(m_t)
-                h2.fill(m)
-                h3.fill(m_c)
-            fig, ax = plt.subplots(
-                2, 1, gridspec_kw={"height_ratios": [3, 1]}, figsize=(8, 8)
+            h=hist.Hist(hist.axis.Regular(15,a,b,label=label[i%3],underflow=False,overflow=False))
+            h2=hist.Hist(hist.axis.Regular(15,a,b,label=label[i%3],underflow=False,overflow=False))
+            h.fill(self.gen[:,i].numpy())
+            h2.fill(self.test_set[:,i].numpy())
+            
+            plt.tight_layout()
+            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0,k] )
+       
+            main_ax_artists, sublot_ax_arists = h.plot_ratio(
+                h2,
+                ax_dict={"main_ax":ax_temp[0],"ratio_ax":ax_temp[1]},
+                rp_ylabel=r"Ratio",
+#                 rp_xlabel=label[i%3],
+                rp_num_label="Generated",
+                rp_denom_label="Ground Truth",
+                rp_uncert_draw_type="line",  # line or bar
             )
+            
+            
+            ax_temp[0].set_xlabel("")
+            ax_temp[1].set_ylim(0.25,2)
+            ax_temp[0].set_xlim(a,b)
+            ax_temp[1].set_xlim(a,b)
+            ax_temp[1].set_xlabel(label[i%3],fontsize=22)
+            ax_temp[0].set_ylabel("Counts" ,fontsize=18)
+            ax_temp[1].set_ylabel("Ratio",fontsize=18)
+            ax[0,k].patches[1].set_fill(True)
+            ax[0,k].patches[1].set_fc("orange")
+            ax[0,k].patches[1].set_alpha(0.3) 
+            ax[0,k].get_legend().remove()
+            #plt.tight_layout(pad=2)
+            k+=1
+        ax[0,-1].legend(loc="best",fontsize=18)  
+        plt.close()
+        # if not save==None:
+        #     plt.savefig(save+str(ith)+".pdf",format="pdf")
+        #plt.show()
 
-            #             hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            try:
-                main_ax_artists, sublot_ax_arists = h.plot_ratio(
-                    h3,
-                    ax_dict={"main_ax": ax[0], "ratio_ax": ax[1]},
-                    rp_ylabel=r"Ratio",
-                    rp_num_label="MC Simulated",
-                    rp_denom_label="Flow Generated+Corrected",
-                    rp_uncert_draw_type="line",  # line or bar
-                )
 
-                h2.plot(ax=ax[0], label="Flow Generated")
-                ax[0].set_xlabel("")
-                #                 if quantile and v=="m" and plot_vline:
-                #                     ax[0].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile Flow Generated",hatch="/")
-                #                     ax[0].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile MC Simulated')
-
-                ax[1].set_ylim(0.25, 2)
-                ax[0].set_xlim(a, b)
-                ax[0].legend()
-                ax[1].set_xlim(a, b)
-            #                 if v!="m":
-            #                     ax[0].legend(["Flow Generated","MC Simulated"])
-            #                 elif plot_vline:
-            #                     ax[0].legend(["Flow Generated","MC Simulated"] )
-            except:
-                print("mass plot failed reverting to simple plot mass bins")
-                traceback.print_exc()
-                plt.close()
-                plt.figure()
-                _, b, _ = plt.hist(m_t, 15, label="Sim", alpha=0.5)
-                plt.hist(m, b, label="Gen", alpha=0.5)
-                plt.legend()
-            # hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            ax[1].set_xlabel(name, fontsize=28)
-            ax[0].set_ylabel("Counts", fontsize=28)
-            ax[1].set_ylabel("Ratio", fontsize=28)
-
-            plt.tight_layout(pad=2)
-            if save:
-                if v != "m":
-                    self.summary.add_figure("inclusive" + v, fig, self.step)
-                else:
-                    self.summary.add_figure("jet_mass", fig, self.step)
-            #             print("added figure")
-            #             self.summary.close()
+   
+        
+    def oversample(self,m,m_t,weight,save=None,quantile=False,bins=15,plot_vline=False,title="",leg=-2):
+        #This creates a histogram of the inclusive distributions and calculates the mass of each jet
+        #and creates a histogram of that
+        #if save, the histograms are logged to tensorboard otherwise they are shown
+        #if quantile, this also creates a histogram of a subsample of the generated data, 
+        # where the mass used to condition the flow is in the first 10% percentile of the simulated mass dist
+        i=0
+        k=0
+        fig,ax=plt.subplots(2,4,gridspec_kw={'height_ratios': [3, 1]},figsize=(20,5))
+        plt.suptitle(save)
+        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{rel}$",r"$\phi^{rel}$",r"$p_T^{rel}$",r"$m^{rel}$"]):
+            
+            if v!="m":
+                a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
+                b=max(np.quantile(self.gen[:,i],0.999),np.quantile(self.test_set[:,i],0.999))     
+                
+                h=hist.Hist(hist.axis.Regular(bins,a,b))
+                h2=hist.Hist(hist.axis.Regular(bins,a,b))
+                h.fill(self.gen[:,i],weight=1/weight)
+                
+                h2.fill(self.test_set[:,i])
+                i+=1
             else:
-                plt.show()
+                a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
+                b=max(np.quantile(m_t,0.999),np.quantile(m,0.999))
+                a=np.quantile(m_t,0.001)
+                b=np.quantile(m_t,0.999)
+                h=hist.Hist(hist.axis.Regular(bins,a,b))
+                h2=hist.Hist(hist.axis.Regular(bins,a,b))
+                
+                h.fill(m,weight=1/weight)#,weight=1/self.weight)
+                h2.fill(m_t)
+            
+            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+        
+            main_ax_artists, sublot_ax_arists = h.plot_ratio(
+                h2,
+                ax_dict={"main_ax":ax[0,k],"ratio_ax":ax[1,k]},
+                rp_ylabel=r"Ratio",
+                rp_num_label=r"Generated$\times{}$".format(1./weight),
+                rp_denom_label="Ground Truth",
+                rp_uncert_draw_type="line",  # line or bar
+            )
+            ax[0,k].set_xlabel("")
+#                 if quantile and v=="m" and plot_vline:
+#                     ax[0,k].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile gen",hatch="/")
+#                     ax[0,k].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile train')
+
+
+            ax[1,k].set_ylim(0.25,2)
+            ax[0,k].set_xlim(a,b)
+            ax[1,k].set_xlabel(name,fontsize=18)
+            ax[1,k].set_xlim(a,b)
+            ax[0,k].set_ylabel("Counts" ,fontsize=18)
+            ax[1,k].set_ylabel("Ratio",fontsize=18)
+            ax[0,k].patches[1].set_fill(True)
+            ax[0,k].patches[1].set_fc("orange")
+            ax[0,k].patches[1].set_alpha(0.3) 
+            ax[0,k].get_legend().remove()
+            plt.tight_layout(pad=1)
+            k+=1
+        ax[0,leg].legend(loc="best",fontsize=15) 
+        # if not save==None:   
+        #         plt.savefig(save+".pdf",format="pdf")
+
+            
+    def plot_mass(self,m,m_t,save=None,quantile=False,bins=15,plot_vline=False,title="",leg=-1):
+        #This creates a histogram of the inclusive distributions and calculates the mass of each jet
+        #and creates a histogram of that
+        #if save, the histograms are logged to tensorboard otherwise they are shown
+        #if quantile, this also creates a histogram of a subsample of the generated data, 
+        # where the mass used to condition the flow is in the first 10% percentile of the simulated mass dist
+        i=0
+        k=0
+        fig,ax=plt.subplots(2,4,gridspec_kw={'height_ratios': [3, 1]},figsize=(24,6))
+        plt.suptitle("All Particles",fontweight="bold",fontsize=18)
+        for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{\tt rel}$",r"$\phi^{\tt rel}$",r"$p_T^{\tt rel}$",r"$m^{\tt rel}$"]):
+            
+            if v!="m":
+                a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
+                b=max(np.quantile(self.gen[:,i],0.999),np.quantile(self.test_set[:,i],0.999))     
+                temp=self.test_set[:,i].numpy()
+                h=hist.Hist(hist.axis.Regular(bins,a,b))
+                h2=hist.Hist(hist.axis.Regular(bins,a,b))
+                h.fill(self.gen[:,i])
+                h2.fill(self.test_set[:,i])
+                i+=1
+            else:
+                a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
+                b=max(np.quantile(m_t,0.999),np.quantile(m,0.999))
+                a=np.quantile(m_t,0.001)
+                b=np.quantile(m_t,0.999)
+                h=hist.Hist(hist.axis.Regular(bins,a,b))
+                h2=hist.Hist(hist.axis.Regular(bins,a,b))
+                #bins = h.axes[0].edges
+                h.fill(m)#,weight=1/self.weight)
+                h2.fill(m_t)
+                temp=m_t
+            
+            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+        
+            main_ax_artists, sublot_ax_arists = h.plot_ratio(
+                h2,
+                ax_dict={"main_ax":ax[0,k],"ratio_ax":ax[1,k]},
+                rp_ylabel=r"Ratio",
+                bar_="blue",
+                rp_num_label="Generated",
+                rp_denom_label="Ground Truth",
+                rp_uncert_draw_type="line",  # line or bar
+            )
+            ax[0,k].set_xlabel("")
+            
+
+            # ax[0,k].patches[1].set_fc("orange")
+            # ax[0,k].patches[1].set_alpha(0.5)
+#                 if quantile and v=="m" and plot_vline:
+#                     ax[0,k].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile gen",hatch="/")
+#                     ax[0,k].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile train')
+
+            #ax[0,k].hist(temp,bins=bins,color="orange",alpha=0.5)  
+            ax[0,k].patches[1].set_fill(True)
+            ax[0,k].patches[1].set_fc("orange")
+            ax[0,k].patches[1].set_alpha(0.3) 
+            ax[1,k].set_ylim(0.25,2)
+            ax[0,k].set_xlim(a,b)
+            ax[1,k].set_xlabel(name,fontsize=22)
+            ax[1,k].set_xlim(a,b)
+            ax[0,k].set_ylabel("Counts", fontsize=18)
+            ax[1,k].set_ylabel("Ratio",fontsize=18)
+            ax[0,k].get_legend().remove()
+            k+=1
+#                 if plot_vline:
+#                        ax[0,k].legend(["Generated","Training","10% quantile Gen","10% quantile Sim"] )
+#                 else:
+#                       ax[0,k].legend(["Flow Generated","MC Simulated"] )
+            
+            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
+            
+#             plt.xlabel(name)
+        
+        ax[0,leg].legend(loc="best",fontsize=18)  
+        plt.tight_layout(pad=1)
+        # if not save==None:
+        #     plt.savefig(save+".pdf",format="pdf")
+        self.summary.add_figure("inclusive", fig, self.step)
+        plt.close()
 
     def plot_correlations(self, save=True):
         # Plots correlations between all particles for i=0 eta,i=1 phi,i=2 pt
@@ -304,18 +419,30 @@ class plotting:
         ax[1].set_xticks([])
         ax[0].set_yticks([])
         ax[1].set_yticks([])
-        if save:
-            title = ["corr_eta", "corr_phi", "corr_pt"]
-            self.summary.add_figure(title[i], fig, self.step)
-
+        #if save:
+        title = ["corr_eta", "corr_phi", "corr_pt"]
+        self.summary.add_figure(title[i], fig, self.step)
+        plt.close()
         #             self.summary.close()
-        else:
-            plt.show()
+        # else:
+        #     plt.show()
     def plot_scores(self,pred_real,pred_fake,train,step):
         fig, ax = plt.subplots()
-        _,bins,_=ax.hist(pred_real.detach().cpu().numpy(), label="MC Simulated", bins=np.linspace(-0.1,1.1,100), histtype="step")
-        ax.hist(pred_fake.detach().cpu().numpy(), label="ML Generated", bins=bins, histtype="step")
+        bins=np.linspace(0,1,100)
+        ax.hist(pred_fake.detach().cpu().numpy(), label="Generated", bins=bins, histtype="step")
+        ax.hist(pred_real.detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled")
         ax.legend()
         plt.ylabel("Counts")
         plt.xlabel("Critic Score")
         self.summary.add_figure("class_train" if train else "class_val", fig, global_step=step)
+        plt.close()
+    def plot_mom(self,step):
+        fig, ax = plt.subplots()
+        bins=np.linspace(0.7,1.4,100)
+        ax.hist(self.gen.reshape(len(self.gen),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Generated", bins=bins, histtype="step",alpha=.3)
+        ax.hist(self.test_set.reshape(len(self.test_set),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled")
+        ax.legend()
+        plt.ylabel("Counts")
+        plt.xlabel("$\sum p_T^{rel}$")
+        self.summary.add_figure("momentum_sum", fig, global_step=step)
+        plt.close()
