@@ -99,7 +99,8 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    parton=np.random.choice(["t","q"])
+    parton=np.random.choice(["q","t"])#"q","g",
+    
     best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
     with open(best_hparam, 'r') as stream:
         config=yaml.load(stream,Loader=yaml.Loader)
@@ -107,6 +108,7 @@ if __name__ == "__main__":
         config=config["config"]
     hyperopt=True
     config["val_check"]=50
+    config["parton"] =parton
     if hyperopt:
 
         # config["no_hidden"]=np.random.choice([True,False,"more"])
@@ -117,33 +119,33 @@ if __name__ == "__main__":
         config["bullshitbingo2"]=np.random.choice([True,False])
         config["scalingbullshit"]=np.random.choice([True])
         #config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
-        config["warmup"]=np.random.choice([1500])
+        config["warmup"]=np.random.choice([800,400,1200])
         config["sched"]=np.random.choice(["cosine2",None])
-        config["momentum"]=np.random.choice([True,False])
+        config["momentum"]=np.random.choice([True])
         config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([1024,2048,3096]))    # config["opt"]="Adam"
-        config["dropout"]=np.random.choice([0.1,0.15,0.05])    
+        config["dropout"]=np.random.choice([0.1,0.15,0.2])    
         config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
         config["lr_g"]=np.random.choice([0.0003,0.0001])  
         config["ratio"]=np.random.choice([0.9,1,1.3,])
         config["context_features"]=np.random.choice([0])
         config["l_dim"]=np.random.choice([25])
         config["heads"]=np.random.choice([3,4,5])
-        config["hidden"]=np.random.choice([128,256,512])
+        config["hidden"]=np.random.choice([256,512,700])
         config["val_check"]=25
         config["lr_d"]=config["lr_g"]*config["ratio"]
         config["l_dim"] = config["l_dim"] * config["heads"]
-        config["parton"] =np.random.choice(["q","g","t"])
+        
         config["name"] = config["name"]+config["parton"]
         config["no_hidden_gen"]=np.random.choice([True,False,"more"])
         config["no_hidden"]=np.random.choice([True,False,"more"])
-        config["max_epochs"]=np.random.choice([1200,2400])    
-        config["name"]="momentum_"+parton
+        config["max_epochs"]=np.random.choice([2400,3600])    
+        config["name"]="with_momentum_"+parton
         config["last_clf"]=False
     else:
         # config["last_clf"]=True
         # config["gen_mask"]=True
-        
+        print("hyperopt off"*100)
         config["name"]="bestever_"+parton#config["parton"]
         #config["freq"]=6    # config["opt"]="Adam"
     print(config)

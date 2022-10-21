@@ -1,4 +1,4 @@
-print("thx max")
+
 import matplotlib.pyplot as plt
 import os
 import hist
@@ -70,7 +70,8 @@ from torch import nn
 from torch.nn import functional as F
 import pandas as pd
 import time
-
+import matplotlib as mpl
+mpl.rcParams['lines.linewidth'] = 2
 
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
 def mass(p, canonical=False):
@@ -430,7 +431,7 @@ class plotting():
         fig, ax = plt.subplots()
         bins=np.linspace(0,1,100)
         ax.hist(pred_fake.detach().cpu().numpy(), label="Generated", bins=bins, histtype="step")
-        ax.hist(pred_real.detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled")
+        ax.hist(pred_real.detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled",alpha=0.3)
         ax.legend()
         plt.ylabel("Counts")
         plt.xlabel("Critic Score")
@@ -438,9 +439,9 @@ class plotting():
         plt.close()
     def plot_mom(self,step):
         fig, ax = plt.subplots()
-        bins=np.linspace(0.7,1.4,100)
+        bins=np.linspace(0.7,1.4,30)
         ax.hist(self.gen.reshape(len(self.gen),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Generated", bins=bins, histtype="step",alpha=.3)
-        ax.hist(self.test_set.reshape(len(self.test_set),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled")
+        ax.hist(self.test_set.reshape(len(self.test_set),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled",alpha=0.3)
         ax.legend()
         plt.ylabel("Counts")
         plt.xlabel("$\sum p_T^{rel}$")

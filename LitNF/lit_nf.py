@@ -436,7 +436,7 @@ class TransGan(pl.LightningModule):
             self.log("lr_nf", sched_nf.get_last_lr()[-1], logger=True, on_epoch=True,on_step=False)
             self.log("lr_d", sched_d.get_last_lr()[-1], logger=True, on_epoch=True,on_step=False)
 
-        if self.current_epoch < self.train_nf or self.config["context_features"]==2 :
+        if self.current_epoch < 4*self.train_nf:
             if self.config["sched"] != None:
                 sched_nf.step()
             nf_loss = -self.flow.to(self.device).log_prob(batch,context=c).mean()
@@ -485,8 +485,7 @@ class TransGan(pl.LightningModule):
             self.log("d_loss", d_loss, logger=True, prog_bar=True)
             if self.global_step < 2:
                 print("passed test disc")
-            # self.logger.experiment.add_scalars("d_losses",{"train_disc":d_loss_avg},global_step=self.global_step)
-
+            
         if (self.current_epoch > self.train_nf and self.global_step % self.freq_d < 2) or self.global_step <= 3:
             opt_g.zero_grad()
             fake = self.sampleandscale(batch, mask, scale=False)#~(mask.bool())
@@ -577,6 +576,7 @@ class TransGan(pl.LightningModule):
 
         w1m_ = w1m(fake_scaled, true_scaled)[0]
         w1p_ = w1p(fake_scaled, true_scaled)[0]
+        w1efp_ = w1efp(fake_scaled, true_scaled)[0]
 
         if fpndv<0.15 and w1m_<0.001 and not self.refinement:
             _,opt_d,opt_g=self.optimizers()
@@ -585,7 +585,6 @@ class TransGan(pl.LightningModule):
             for g in opt_g.param_groups:
                 g['lr'] *= 0.01
             self.refinement=True
-        w1efp_ = w1efp(fake_scaled, true_scaled)[0]
         self.w1ms.append(w1m_)
         self.fpnds.append(fpndv)
         if (np.array([self.fpnds])[-4:] > 4).all() and self.current_epoch > self.config["max_epochs"]/2 and not self.config["bullshitbingo2"] or (np.array([self.w1ms])[-4:] > 0.006).all() and self.current_epoch > self.config["max_epochs"]/2 and not self.config["bullshitbingo2"]:
