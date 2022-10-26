@@ -116,7 +116,7 @@ class plotting():
         model=the model that is trained, a bit of an overkill as it is only used to access the losses
         config=the config used for training
         logger=The logger used for tensorboard logging'''
-    def __init__(self,true,gen,config,p,step=None,model=None,logger=None,weight=1):
+    def __init__(self,true,gen,config,p,step=None,model=None,logger=None,weight=1,nf=None):
         self.config=model.config
         self.n_dim=self.config["n_dim"]
         self.gen=gen
@@ -125,7 +125,7 @@ class plotting():
         self.model=model
         self.p=p
         self.n_part=config["n_part"]
-
+        self.nf=nf
         self.n_dim=config["n_dim"]
         self.weight=weight
         if logger is not None:
@@ -440,8 +440,10 @@ class plotting():
     def plot_mom(self,step):
         fig, ax = plt.subplots()
         bins=np.linspace(0.7,1.4,30)
-        ax.hist(self.gen.reshape(len(self.gen),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Generated", bins=bins, histtype="step",alpha=.3)
+        ax.hist(self.gen.reshape(len(self.gen),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Generated", bins=bins, histtype="step",alpha=1)
+        
         ax.hist(self.test_set.reshape(len(self.test_set),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled",alpha=0.3)
+        ax.hist(self.nf.reshape(len(self.nf),self.n_part,3)[:,:,2].sum(1).detach().cpu().numpy(), label="NF", bins=bins, histtype="step",alpha=1,linestyle="dashed")
         ax.legend()
         plt.ylabel("Counts")
         plt.xlabel("$\sum p_T^{rel}$")

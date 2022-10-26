@@ -22,7 +22,7 @@ from torch.nn import TransformerEncoderLayer
 from torch.nn import functional as FF
 from torch.nn.functional import leaky_relu, sigmoid
 
-from helpers import CosineWarmupScheduler
+from helpers import CosineWarmupScheduler, Scheduler
 from plotting import *
 
 
@@ -125,25 +125,28 @@ class Gen(nn.Module):
         if not self.gen_mask:
             mask = None
         x = self.embbed(x)
-        x = self.encoder(x, src_key_padding_mask=mask,)#attention_mask.bool()
-        if self.no_hidden_gen==True:
-            x = leaky_relu(x)
+        x = self.encoder(x, src_key_padding_mask=mask.bool(),)#attention_mask.bool()
+        if self.no_hidden_gen=="more":
+            x = leaky_relu(self.hidden(x))
+            x = self.dropout(x)
+            x = leaky_relu(self.hidden2(x))
+            x = self.dropout(x)
+            x = leaky_relu(self.hidden3(x))
+            x = self.dropout(x)  
+            x=self.out(x)
+        elif self.no_hidden_gen==True:
+            #x = leaky_relu(x)
             x = self.out2(x)
         else:
             x = leaky_relu(self.hidden(x))
             x = self.dropout(x)
             x = leaky_relu(self.hidden2(x))
-            x = self.dropout(x)
-            if self.no_hidden_gen=="more":
-                x = leaky_relu(self.hidden3(x))
-                x = self.dropout(x)   
-            
             x = self.out(x)
         return x
 
 
 class Disc(nn.Module):
-    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=2,last_clf = True,dropout=0.5,mass=False,clf=False,bullshitbingo=True,momentum=False):
+    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=2,last_clf = True,dropout=0.5,mass=False,clf=False,affine_add=True,momentum=False):
         super().__init__()
         self.hidden_nodes = hidden
         self.n_dim = n_dim
@@ -151,7 +154,7 @@ class Disc(nn.Module):
         self.n_part = n_part
         self.last_clf = last_clf
         self.clf = clf
-        self.bullshitbingo=bullshitbingo
+        self.affine_add=affine_add
         self.embbed = nn.Linear(n_dim, l_dim)
         self.encoder = nn.TransformerEncoder(
             TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,
@@ -159,35 +162,51 @@ class Disc(nn.Module):
             num_layers=num_layers,
         )
         self.encoder_class=TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout, norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True)
-        self.hidden = nn.Linear(l_dim + int(mass)+int(momentum), 2 * hidden)
+        if not self.affine_add:
+            self.hidden = nn.Linear(l_dim + int(mass)+int(momentum), 2 * hidden)
+        else:
+            self.hidden = nn.Linear(l_dim, 2 * hidden)
         self.hidden2 = nn.Linear(2 * hidden, hidden)
         self.out = nn.Linear(hidden, 1)
-
+        self.cond = nn.Linear(max(int(mass)+int(momentum),1),l_dim)
+        self.mass=mass
+        self.momentum=momentum
     def forward(self, x, m=None,p=None, mask=None,noise=0):
         x = self.embbed(x)
+
         if self.clf:
+            mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device).bool()
             if not self.last_clf:
-                if self.bullshitbingo and m is not None:
-                    x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1)*m.reshape(len(x),1,1), x), axis=1)
+                if self.affine_add:  
+                    if self.mass:
+                    #x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1)*m.reshape(len(x),1,1), x), axis=1)
+                        if self.momentum:
+                            x=torch.concat((self.cond(torch.concat((m.reshape(-1,1),p.reshape(-1,1)),axis=1)).reshape(len(x), 1, -1),x), axis=1)
+                        
+                        else:
+                            x=torch.concat((self.cond(m.reshape(-1,1)).reshape(len(x),1,-1),x),axis=1)
+                    elif self.momentum:
+                            x=torch.concat((self.cond(p.reshape(-1,1)).reshape(len(x), 1, -1),x), axis=1)
                 else:
                     x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
-                if not mask==None:
-                    mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device).bool()
-                x = self.encoder(x, src_key_padding_mask=mask)
+                assert mask.shape[1]==x.shape[1]
+               
+                    
+                x = self.encoder(x, src_key_padding_mask=mask.bool())
             else:
-                x = self.encoder(x, src_key_padding_mask=mask)
+                x = self.encoder(x, src_key_padding_mask=mask.bool())
                 # x = torch.concat((nn.Parameter(torch.zeros_like(x[0,0,:]).reshape(1,1,-1)).expand(len(x),-1,-1),x),dim=1)
                 x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
                 if not mask==None:
                     mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).bool()
-                x=self.encoder_class(x,src_key_padding_mask=mask)
+                x=self.encoder_class(x,src_key_padding_mask=mask.bool())
             x = x[:, 0, :]
         else:
-            x = self.encoder(x, src_key_padding_mask=mask)
+            x = self.encoder(x, src_key_padding_mask=mask.bool())
             x = torch.sum(x, axis=1)
-        if m is not None:
+        if m is not None and not self.affine_add:
             x = torch.concat((m.reshape(len(x), 1), x), axis=1)
-        if p is not None:
+        if p is not None and not self.affine_add:
             p=p+noise
             x = torch.concat((p.reshape(len(x), 1), x), axis=1)
         x = leaky_relu(self.hidden(x), 0.2)
@@ -233,6 +252,7 @@ class TransGan(pl.LightningModule):
         self.flows = []
         self.fpnds = []
         self.w1ms = []
+        self.stop_train=False
         self.n_dim = self.config["n_dim"]
         self.n_part = config["n_part"]
         self.alpha = 1
@@ -243,7 +263,7 @@ class TransGan(pl.LightningModule):
                             num_heads=config["heads"],gen_mask=config["gen_mask"]).cuda()
         self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],
                             mass=self.config["mass"],num_heads=config["heads"],last_clf=config["last_clf"],n_part=config["n_part"],momentum=self.config["momentum"],
-                            dropout=config["dropout"],clf=config["clf"],bullshitbingo=config["bullshitbingo"]).cuda()
+                            dropout=config["dropout"],clf=config["clf"],affine_add=config["affine_add"]).cuda()
         self.sig = nn.Sigmoid()
         self.df = pd.DataFrame()
         for p in self.dis_net.parameters():
@@ -291,6 +311,7 @@ class TransGan(pl.LightningModule):
             self.counter += 1
             if self.counter > 5:
                 raise ValueError("5 nangrads in a row")
+            self.stop_train=True
         else:
             self.counter = 0
     
@@ -334,7 +355,10 @@ class TransGan(pl.LightningModule):
                 c = torch.cat(( mass(batch).reshape(-1,1),(~c).sum(axis=1).reshape(-1,1)),dim=1).float()                
             else: 
                 c=None
-            z = self.flow.sample(len(batch) if self.config["context_features"]==0 else 1,context=c).reshape(len(batch), self.n_part, self.n_dim)
+            self.flow.eval()
+            z = self.flow.sample(len(batch) if self.config["context_features"]==0 else 1,context=c).reshape(len(batch), 
+            self.n_part, self.n_dim)
+            self.flow.train()
         fake = z + self.gen_net(z, mask=mask)
         # fake = fake*((~mask).reshape(len(batch),30,1).float()) #somehow this gives nangrad
         fake[mask]=0
@@ -386,23 +410,31 @@ class TransGan(pl.LightningModule):
         if self.config["sched"] == "cosine":
             lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
             max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            if self.config["bullshitbingo2"]:
-                self.freq_d+=1
+            # if self.config["bullshitbingo2"]:
+            #     self.freq_d+=1
             max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches // (self.freq_d-1)
             lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_d)
             lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_g)
-            if self.config["bullshitbingo2"]:
-                self.freq_d-=1
+            # if self.config["bullshitbingo2"]:
+            #     self.freq_d-=1
         elif self.config["sched"] == "cosine2":
             lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
             max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            if self.config["bullshitbingo2"]:
-                self.freq_d+=1
+            # if self.config["bullshitbingo2"]:
+            #     self.freq_d+=1
             max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//(self.freq_d-1)
             lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_d//3 )#15,150 // 3
             lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches //(self.freq_d-1), max_iters=max_iter_g//3)#  // 3
-            if self.config["bullshitbingo2"]:
-                self.freq_d-=1
+            # if self.config["bullshitbingo2"]:
+            #     self.freq_d-=1
+        elif self.config["sched"] == "linear":
+            lr_scheduler_nf = CosineWarmupScheduler(opt_nf, warmup=1, max_iters=10000000 * self.config["freq"])
+            max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
+            
+            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//(self.freq_d-1)
+            lr_scheduler_d = Scheduler(opt_d,dim_embed=self.config["l_dim"], warmup_steps=self.config["warmup"] * self.num_batches )#15,150 // 3
+            lr_scheduler_g = Scheduler(opt_g, dim_embed=self.config["l_dim"], warmup_steps=self.config["warmup"] * self.num_batches //(self.freq_d-1))#  // 3
+
         else:
             lr_scheduler_nf = None
             lr_scheduler_d = None
@@ -436,7 +468,7 @@ class TransGan(pl.LightningModule):
             self.log("lr_nf", sched_nf.get_last_lr()[-1], logger=True, on_epoch=True,on_step=False)
             self.log("lr_d", sched_d.get_last_lr()[-1], logger=True, on_epoch=True,on_step=False)
 
-        if self.current_epoch < 4*self.train_nf:
+        if not self.stop_train and self.global_step % self.freq_d < 2 or self.global_step<self.train_nf:# self.current_epoch < 150*self.train_nf:
             if self.config["sched"] != None:
                 sched_nf.step()
             nf_loss = -self.flow.to(self.device).log_prob(batch,context=c).mean()
@@ -530,8 +562,8 @@ class TransGan(pl.LightningModule):
             c=None
         self.dis_net.train()
         self.gen_net.train()
-        self.flow.train()
-        mask_test=self.sample_n(mask)
+        self.flow.eval()
+        mask_test=self.sample_n(mask).bool()
         batch = batch.to("cpu")
         self.flow = self.flow.to("cpu")
         self.dis_net = self.dis_net.cpu()
@@ -578,28 +610,35 @@ class TransGan(pl.LightningModule):
         w1p_ = w1p(fake_scaled, true_scaled)[0]
         w1efp_ = w1efp(fake_scaled, true_scaled)[0]
 
-        if fpndv<0.15 and w1m_<0.001 and not self.refinement:
-            _,opt_d,opt_g=self.optimizers()
+        if fpndv<0.08 and w1m_<0.001 and not self.refinement:
+            opt_nf,opt_d,opt_g=self.optimizers()
+            for g in opt_nf.param_groups:
+                g['lr'] *= 0.001
             for g in opt_d.param_groups:
-                g['lr'] *= 0.01
+                g['lr'] *= 0.1
             for g in opt_g.param_groups:
-                g['lr'] *= 0.01
+                g['lr'] *= 0.001
             self.refinement=True
         self.w1ms.append(w1m_)
         self.fpnds.append(fpndv)
-        if (np.array([self.fpnds])[-4:] > 4).all() and self.current_epoch > self.config["max_epochs"]/2 and not self.config["bullshitbingo2"] or (np.array([self.w1ms])[-4:] > 0.006).all() and self.current_epoch > self.config["max_epochs"]/2 and not self.config["bullshitbingo2"]:
-            print("no convergence, stop training")
-            raise
-
         temp = {"val_logprob": float(logprob.numpy()),"val_fpnd": fpndv,"val_mmd": mmd,"val_cov": cov,"val_w1m": w1m_,
                 "val_w1efp": w1efp_,"val_w1p": w1p_,"step": self.global_step,}
         print("epoch {}: ".format(self.current_epoch), temp)
+        if (np.array([self.fpnds]) > 6).all() and self.global_step > 10000 or (np.array([self.fpnds]) > 2)[-4:].all() and self.current_epoch > 1500 or (np.array([self.fpnds]) > 0.5)[:].all() and self.current_epoch > 3000:
+            print("no convergence, stop training")
+             
+            summary = self._summary(temp)
+            raise
+
+        
         if self.hyperopt and self.global_step > 3:
             try:
                 self._results(temp)
             except:
                 print("error in results")
-            summary = self._summary(temp)
+            if (fpndv<self.fpnds).all():             
+                summary = self._summary(temp)
+        
         self.log("hp_metric", w1m_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1m", w1m_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_w1p", w1p_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
@@ -610,12 +649,12 @@ class TransGan(pl.LightningModule):
         self.log("val_fpnd", fpndv, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_mmd", mmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_mmd_nf", mmd_nf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.plot = plotting(model=self,gen=fake_scaled.reshape(-1,self.n_part*self.n_dim),true=true_scaled.reshape(-1,self.n_part*self.n_dim),config=self.config,step=self.global_step,
+        self.plot = plotting(model=self,gen=fake_scaled.reshape(-1,self.n_part*self.n_dim),true=true_scaled.reshape(-1,self.n_part*self.n_dim),config=self.config,step=self.global_step,nf=z_scaled.reshape(-1,self.n_part*self.n_dim),
             logger=self.logger.experiment,p=self.config["parton"])
         self.plot.plot_scores(scores_real,scores_fake,train=False,step=self.global_step)
         self.plot.plot_mom(self.global_step)
         try:
-            self.plot.plot_mass(m=m_gen.cpu().numpy(), m_t=m_t.cpu().numpy(), save=None, bins=50, quantile=True, plot_vline=False)
+            self.plot.plot_mass(m=m_c.cpu().numpy(), m_t=m_t.cpu().numpy(), save=None, bins=50, quantile=True, plot_vline=False)
             # self.plot.plot_2d(save=True)
         #     self.plot.var_part(true=true[:,:self.n_dim],gen=gen_corr[:,:self.n_dim],true_n=n_true,gen_n=n_gen_corr,
         #                          m_true=m_t,m_gen=m_test ,save=True)

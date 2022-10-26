@@ -83,7 +83,7 @@ class JetNetDataloader(pl.LightningDataModule):
         self.scalers=[]
         
         # standard scaling
-        if self.config["scalingbullshit"]:
+        if self.config["particle_scaling"]:
                 self.scaler=StandardScaler()
                 self.data=self.scaler.fit_transform(self.data)
         else:
