@@ -83,21 +83,9 @@ class JetNetDataloader(pl.LightningDataModule):
         self.scalers=[]
         
         # standard scaling
-        if self.config["particle_scaling"]:
-                self.scaler=StandardScaler()
-                self.data=self.scaler.fit_transform(self.data)
-        else:
-            for i in range(self.n_part):
-                
-                self.scalers.append(StandardScaler())
-                if self.config["quantile"]:
-                    self.ptscalers.append(QuantileTransformer(output_distribution="normal"))
-                    self.data[:, i, :2] = self.scaler.fit_transform(self.data[:, i, :2])
-                    self.data[:, i, 2] = torch.tensor(
-                        self.ptscaler.fit_transform(self.data[:, i, 2].numpy())
-                    )        
-                else:
-                    self.data[:,i,:]=self.scalers[i].fit_transform(self.data[:,i,:])
+        
+        self.scaler=StandardScaler()
+        self.data=self.scaler.fit_transform(self.data)
         self.data = self.data.reshape(len(self.data), 90)
         self.data = torch.tensor(np.hstack((self.data.reshape(len(self.data),self.n_part*self.n_dim), masks)))
         # self.data, self.test_set = train_test_split(self.data.cpu().numpy(), test_size=0.3)
@@ -109,7 +97,7 @@ class JetNetDataloader(pl.LightningDataModule):
         assert (torch.isnan(self.data)).sum() == 0
 
     def train_dataloader(self):
-        return DataLoader(self.data, batch_size=self.batch_size, drop_last=True,num_workers=40)
+        return DataLoader(self.data, batch_size=self.batch_size, drop_last=True,num_workers=8)
 
     def val_dataloader(self):
-        return DataLoader(self.test_set, batch_size=len(self.test_set), drop_last=True,num_workers=40)
+        return DataLoader(self.test_set, batch_size=len(self.test_set), drop_last=True,num_workers=8)
