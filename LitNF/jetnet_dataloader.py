@@ -101,3 +101,4 @@ class JetNetDataloader(pl.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(self.test_set, batch_size=len(self.test_set), drop_last=True,num_workers=8)
+

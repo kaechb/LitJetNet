@@ -24,7 +24,7 @@ else:
 
 import yaml
 
-from nf import TransGan
+from nf import NF
 from plotting import plotting
 
 # from comet_ml import Experiment
@@ -37,7 +37,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
     # hyperopt:whether to optimizer hyper parameters - load_ckpt: path to checkpoint if used
     data_module = JetNetDataloader(config)  # this loads the data
     data_module.setup("training")
-    model = TransGan(
+    model = NF(
         config,  data_module.num_batches
     )  # the sets up the model,  config are hparams we want to optimize
     model.data_module = data_module
@@ -66,11 +66,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
     # model.config = config #config are our hyperparams, we make this a class property now
     print(root)
     version_name=""
-    if config["momentum"]:
-        version_name+="momentum_"
-    if config["mass"]:
-        version_name+="mass_{version}"
-    
+   
     logger = TensorBoardLogger(root)#,version=version_name
     print("Version:",logger.version)
     # log every n steps could be important as it decides how often it should log to tensorboard
@@ -84,7 +80,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
         callbacks=callbacks,
         progress_bar_refresh_rate=0,
         check_val_every_n_epoch=config["val_check"],
-        num_sanity_val_steps=0,  # gradient_clip_val=.02, 
+        num_sanity_val_steps=1,  # gradient_clip_val=.02, 
         fast_dev_run=False,
         default_root_dir=root,
         
@@ -110,7 +106,7 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    parton=np.random.choice(["q","t","g"])#"q","g",
+    parton=np.random.choice(["q","t"])#"q","g",
     
     best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
     with open(best_hparam, 'r') as stream:
@@ -128,45 +124,35 @@ if __name__ == "__main__":
         # config["no_hidden"]=np.random.choice([True,False,"more"])
         # config["no_hidden"]=config["no_hidden"]=="True" or config["no_hidden"]=="more"
 
-        config["gen_mask"]=True
-        
-        config["affine_add"]=np.random.choice([True,False])
+       
 
-        config["coupling_layers"]=np.random.randint(low=10,high=20)
+        config["coupling_layers"]=np.random.randint(low=2,high=10)
         config["lr_nf"]=10.**np.random.choice([-3,-3.5,-4,-4.5,-5])
         config["bins"]=np.random.randint(low=3,high=8)
 
         #config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
         config["warmup"]=np.random.choice([800,1200,1600])
         config["sched"]=np.random.choice(["cosine2","linear",None])
-        config["mass"]=np.random.choice([True,False])
-        config["momentum"]=np.random.choice([True,False])
-        config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
-        config["batch_size"]=int(np.random.choice([10000]))    # config["opt"]="Adam"
-        config["dropout"]=np.random.choice([0.1,0.15,0.05,0.01])    
+        
+       
+        config["batch_size"]=int(np.random.choice([128,256,1024]))    # config["opt"]="Adam"
+        config["emb_dim"]=int(np.random.choice([5,10,30]))    # config["opt"]="Adam"
+        config["enc_hidden"]=int(np.random.choice([128,256,1024]))    # config["opt"]="Adam"
+        config["context_dim"]=int(np.random.choice([5,10,30]))    # config["opt"]="Adam"
+        config["dropout"]=np.random.choice([0.15,0.05,0.01])    
+        config["momentum"]=np.random.choice([False])
+        config["class_dropout"]=np.random.choice([0.1,0.15,0.05,0.01])    
+
         config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
         config["lr_g"]=np.random.choice([0.0003,0.0001])  
         config["ratio"]=np.random.choice([0.9,1,1.3,])
-        config["context_features"]=np.random.choice([0,1])
-        config["num_layers"]=np.random.choice([4,7])
-        if config["num_layers"]>6:
-            config["hidden"]=np.random.choice([256,128])
-            config["l_dim"]=np.random.choice([6,8])
-        else:
-            config["l_dim"]=np.random.choice([25,20,30])
-            config["hidden"]=np.random.choice([512,756,1024])
-        config["heads"]=np.random.choice([4,5,6])
+
+        config["l_dim"]=np.random.choice([25,20,30])
+        config["hidden"]=np.random.choice([512,756,1024])
 
         config["val_check"]=25
-        config["lr_d"]=config["lr_g"]*config["ratio"]
-        config["l_dim"] = config["l_dim"] * config["heads"]
-        
-
-        config["no_hidden_gen"]=np.random.choice([True,False,"more"])
-        config["no_hidden"]=np.random.choice([True,"more"])
         config["max_epochs"]=np.random.choice([4800,6000])    
-        config["name"]="nf_"+parton
-        config["last_clf"]=False
+        config["name"]="linear_"+parton
     else:
         # config["last_clf"]=True
         # config["gen_mask"]=True
