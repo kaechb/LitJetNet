@@ -1,7 +1,6 @@
 
 import matplotlib.pyplot as plt
 import os
-import hist
 import mplhep as hep
 import torch
 import numpy as np
@@ -11,69 +10,23 @@ import traceback
 import pandas as pd
 import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-from helpers import *
-import os
+# from helpers import mass
 from scipy import stats
 import datetime
-import pandas as pd
-import traceback
+
 import time
 from torch import nn
-
-gen_step = 0
-
-# train mode
-import nflows as nf
-from nflows.utils.torchutils import create_random_binary_mask
-from nflows.transforms.base import CompositeTransform
-from nflows.transforms.coupling import *
-from nflows.nn import nets
-from nflows.flows.base import Flow
-from nflows.flows import base
-from nflows.transforms.coupling import *
-from nflows.transforms.autoregressive import *
-
-from pytorch_lightning.callbacks import ModelCheckpoint
-
-# from comet_ml import Experiment
-
-import pytorch_lightning as pl
-import os
-
-# from plotting import plotting
 from torch.nn import functional as FF
 import traceback
 import os
 
 import pytorch_lightning as pl
-from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau, ExponentialLR
-import torch
-from torch import nn
-from torch.nn import functional as FF
-import numpy as np
-from jetnet.evaluation import w1p, w1efp, w1m, cov_mmd, fpnd
-import mplhep as hep
+
+
 import hist
 from hist import Hist
-from pytorch_lightning.loggers import TensorBoardLogger
-from collections import OrderedDict
-
-from helpers import *
-
-import pandas as pd
-import os
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-from torch import nn
-from torch.nn import functional as F
-import pandas as pd
-import time
 import matplotlib as mpl
 mpl.rcParams['lines.linewidth'] = 2
-
-# from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
 def mass(p, canonical=False):
     if len(p.shape)==2:
         n_dim = p.shape[1]
@@ -312,13 +265,13 @@ class plotting():
         for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{\tt rel}$",r"$\phi^{\tt rel}$",r"$p_T^{\tt rel}$",r"$m^{\tt rel}$"]):
             
             if v!="m":
-                a=min(np.quantile(self.gen[:,i],0.001),np.quantile(self.test_set[:,i],0.001))
-                b=max(np.quantile(self.gen[:,i],0.999),np.quantile(self.test_set[:,i],0.999))     
-                temp=self.test_set[:,i].numpy()
+                a=min(np.quantile(self.gen.reshape(-1,3)[:,i],0.001),np.quantile(self.test_set.reshape(-1,3)[:,i],0.001))
+                b=max(np.quantile(self.gen.reshape(-1,3)[:,i],0.999),np.quantile(self.test_set.reshape(-1,3)[:,i],0.999))     
+                temp=self.test_set.reshape(-1,3)[:,i].numpy()
                 h=hist.Hist(hist.axis.Regular(bins,a,b))
                 h2=hist.Hist(hist.axis.Regular(bins,a,b))
-                h.fill(self.gen[:,i])
-                h2.fill(self.test_set[:,i])
+                h.fill(self.gen.reshape(-1,3)[:,i])
+                h2.fill(self.test_set.reshape(-1,3)[:,i])
                 i+=1
             else:
                 a=min(np.quantile(m_t,0.001),np.quantile(m,0.001))
@@ -346,13 +299,7 @@ class plotting():
             ax[0,k].set_xlabel("")
             
 
-            # ax[0,k].patches[1].set_fc("orange")
-            # ax[0,k].patches[1].set_alpha(0.5)
-#                 if quantile and v=="m" and plot_vline:
-#                     ax[0,k].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile gen",hatch="/")
-#                     ax[0,k].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile train')
 
-            #ax[0,k].hist(temp,bins=bins,color="orange",alpha=0.5)  
             ax[0,k].patches[1].set_fill(True)
             ax[0,k].patches[1].set_fc("orange")
             ax[0,k].patches[1].set_alpha(0.3) 
@@ -363,16 +310,9 @@ class plotting():
             ax[0,k].set_ylabel("Counts", fontsize=18)
             ax[1,k].set_ylabel("Ratio",fontsize=18)
             ax[0,k].get_legend().remove()
+            ax[0,k].ticklabel_format(axis='y', style='sci', scilimits=(3,4))
             k+=1
-#                 if plot_vline:
-#                        ax[0,k].legend(["Generated","Training","10% quantile Gen","10% quantile Sim"] )
-#                 else:
-#                       ax[0,k].legend(["Flow Generated","MC Simulated"] )
-            
-            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            
-#             plt.xlabel(name)
-        
+
         ax[0,leg].legend(loc="best",fontsize=18)  
         plt.tight_layout(pad=1)
         # if not save==None:
