@@ -75,7 +75,7 @@ def train(config,  load_ckpt=None, i=0, root=None):
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
-        log_every_n_steps=500,  # auto_scale_batch_size="binsearch",
+        log_every_n_steps=100,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
         progress_bar_refresh_rate=0,
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    parton=np.random.choice(["q","t"])#"q","g",
+    parton=np.random.choice(["t"])#"q","g",
     
     best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
     with open(best_hparam, 'r') as stream:
@@ -126,7 +126,7 @@ if __name__ == "__main__":
 
        
 
-        config["coupling_layers"]=np.random.randint(low=2,high=10)
+        config["coupling_layers"]=np.random.randint(low=2,high=5)
         config["lr_nf"]=10.**np.random.choice([-3,-3.5,-4,-4.5,-5])
         config["bins"]=np.random.randint(low=3,high=8)
 
@@ -135,24 +135,25 @@ if __name__ == "__main__":
         config["sched"]=np.random.choice(["cosine2","linear",None])
         
        
-        config["batch_size"]=int(np.random.choice([128,256,1024]))    # config["opt"]="Adam"
+        config["batch_size"]=int(np.random.choice([128,256,1024 ]))    # config["opt"]="Adam"
         config["emb_dim"]=int(np.random.choice([5,10,30]))    # config["opt"]="Adam"
         config["enc_hidden"]=int(np.random.choice([128,256,1024]))    # config["opt"]="Adam"
         config["context_dim"]=int(np.random.choice([5,10,30]))    # config["opt"]="Adam"
         config["dropout"]=np.random.choice([0.15,0.05,0.01])    
         config["momentum"]=np.random.choice([False])
         config["class_dropout"]=np.random.choice([0.1,0.15,0.05,0.01])    
-
+        config["network_nodes_nf"]=np.random.choice([32,64,128])
         config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
         config["lr_g"]=np.random.choice([0.0003,0.0001])  
         config["ratio"]=np.random.choice([0.9,1,1.3,])
 
         config["l_dim"]=np.random.choice([25,20,30])
+        
         config["hidden"]=np.random.choice([512,756,1024])
 
         config["val_check"]=25
         config["max_epochs"]=np.random.choice([4800,6000])    
-        config["name"]="linear_"+parton
+        config["name"]="nf_"+parton
     else:
         # config["last_clf"]=True
         # config["gen_mask"]=True

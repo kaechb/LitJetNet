@@ -58,9 +58,7 @@ import hist
 from hist import Hist
 from pytorch_lightning.loggers import TensorBoardLogger
 from collections import OrderedDict
-
 from helpers import *
-
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
@@ -76,6 +74,8 @@ import matplotlib as mpl
 # fig, axs = pplt.show_cycles(rasterized=True)
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
 def mass(p):
+    if not torch.is_tensor(p):
+        p=torch.tensor(p)
     if len(p.shape)==2:
         n_dim = p.shape[1]
         p = p.reshape(-1, n_dim // 3, 3)
@@ -85,9 +85,7 @@ def mass(p):
         px = torch.cos(p[:, :, 1]) * p[:, :, 2]
         py = torch.sin(p[:, :, 1]) * p[:, :, 2]
         pz = torch.sinh(p[:, :, 0]) * p[:, :, 2]
-    px = torch.clamp(px, min=-100, max=100)
-    py = torch.clamp(py, min=-100, max=100)
-    pz = torch.clamp(pz, min=-100, max=100)
+    
     E = torch.sqrt(px**2 + py**2 + pz**2)
     E = E.sum(axis=1) ** 2
     p = px.sum(axis=1) ** 2 + py.sum(axis=1) ** 2 + pz.sum(axis=1) ** 2
@@ -113,7 +111,7 @@ class plotting():
         model=the model that is trained, a bit of an overkill as it is only used to access the losses
         config=the config used for training
         logger=The logger used for tensorboard logging'''
-    def __init__(self,true,gen,config,p,step=None,model=None,logger=None,weight=1,nf=None):
+    def __init__(self,true,gen,config,p,step=None,model=None,logger=None,weight=1,nf=None,n=30):
         self.config=model.config
         self.n_dim=self.config["n_dim"]
         self.test_set=true.numpy()
@@ -122,7 +120,7 @@ class plotting():
         self.gen=gen.numpy()
         self.p=p
         self.n_part=config["n_part"]
- 
+        self.n=n
         self.n_dim=config["n_dim"]
         self.weight=weight
         if logger is not None:
@@ -169,31 +167,26 @@ class plotting():
                 rp_denom_label="Ground Truth",
                 rp_uncert_draw_type="line",  # line or bar
             )
-            
-            
             ax_temp[0].set_xlabel("")
             ax_temp[1].set_ylim(0.25,2)
             ax_temp[0].set_xlim(a,b)
             ax_temp[1].set_xlim(a,b)
-            ax_temp[1].set_xlabel(label[i%3],fontsize=22,fontweight="bold")
-            ax_temp[0].set_ylabel("Counts" ,fontsize=18,fontweight="bold")
-            ax_temp[1].set_ylabel("Ratio",fontsize=18,fontweight="bold")
+            ax_temp[1].set_xlabel(label[i%3])
+            ax_temp[0].set_ylabel("Counts" )
+            ax_temp[1].set_ylabel("Ratio")
             ax[0,k].patches[1].set_fill(True)
-            ax[0,k].patches[1].set_fc("blue")
-            ax[0,k].patches[1].set_alpha(0.3) 
+            ax[0,k].patches[1].set_fc("orange")
+            ax[0,k].patches[1].set_alpha(0.3)
             ax[0,k].get_legend().remove()
             #plt.tight_layout(pad=2)
             k+=1
         ax[0,-1].legend(loc="best",fontsize=18)  
         plt.close()
-        # if not save==None:
-        #     plt.savefig(save+str(ith)+".pdf",format="pdf")
-        #plt.show()
 
 
    
             
-    def plot_mass(self,m,m_t,save=None,quantile=False,bins=15,plot_vline=False,title="",leg=-1):
+    def plot_mass(self,save=None,quantile=False,bins=15,title="",leg=-1):
         #This creates a histogram of the inclusive distributions and calculates the mass of each jet
         #and creates a histogram of that
         #if save, the histograms are logged to tensorboard otherwise they are shown
@@ -203,6 +196,8 @@ class plotting():
         k=0
         fig,ax=plt.subplots(2,4,gridspec_kw={'height_ratios': [3, 1]},figsize=(24,6))
         plt.suptitle("All Particles",fontweight="bold",fontsize=18)
+        m_t=mass(self.test_set).numpy()
+        m=mass(self.gen).numpy()
         for v,name in zip(["eta","phi","pt","m"],[r"$\eta^{\tt rel}$",r"$\phi^{\tt rel}$",r"$p_T^{\tt rel}$",r"$m^{\tt rel}$"]):
             
             if v!="m":
@@ -239,34 +234,19 @@ class plotting():
             )
             ax[0,k].set_xlabel("")
             
-
-            # ax[0,k].patches[1].set_fc("orange")
-            # ax[0,k].patches[1].set_alpha(0.5)
-#                 if quantile and v=="m" and plot_vline:
-#                     ax[0,k].hist(m[m_t<np.quantile(m_t,0.1)],histtype='step',bins=bins,alpha=1,color="red",label="10% quantile gen",hatch="/")
-#                     ax[0,k].vlines(np.quantile(m_t,0.1),0,np.max(h[:]),color="red",label='10% quantile train')
-
-            #ax[0,k].hist(temp,bins=bins,color="orange",alpha=0.5)  
             ax[0,k].patches[1].set_fill(True)
             ax[0,k].patches[1].set_fc("orange")
-            ax[0,k].patches[1].set_alpha(0.3) 
+            ax[0,k].patches[1].set_alpha(0.3)
+
             ax[1,k].set_ylim(0.25,2)
             ax[0,k].set_xlim(a,b)
-            ax[1,k].set_xlabel(name,fontsize=22,fontweight="bold")
+            ax[1,k].set_xlabel(name)
             ax[1,k].set_xlim(a,b)
-            ax[0,k].set_ylabel("Counts", fontsize=18,fontweight="bold")
-            ax[1,k].set_ylabel("Ratio",fontsize=18,fontweight="bold")
+            ax[0,k].set_ylabel("Counts")
+            ax[1,k].set_ylabel("Ratio")
             ax[0,k].get_legend().remove()
             k+=1
-#                 if plot_vline:
-#                        ax[0,k].legend(["Generated","Training","10% quantile Gen","10% quantile Sim"] )
-#                 else:
-#                       ax[0,k].legend(["Flow Generated","MC Simulated"] )
-            
-            #hep.cms.label(data=False,lumi=None ,year=None,rlabel="",llabel="Private Work",ax=ax[0] )
-            
-#             plt.xlabel(name)
-        
+
         ax[0,leg].legend(loc="best",fontsize=18)  
         plt.tight_layout(pad=1)
         # if not save==None:
@@ -318,25 +298,25 @@ class plotting():
         title = ["corr_eta", "corr_phi", "corr_pt"]
         self.summary.add_figure(title[i], fig, self.step)
         plt.close()
-        #             self.summary.close()
-        # else:
-        #     plt.show()
+ 
     def plot_scores(self,pred_real,pred_fake,train,step):
         fig, ax = plt.subplots()
         bins=np.linspace(0,1,100)
-        ax.hist(pred_fake.detach().cpu().numpy(), label="Generated", bins=bins, histtype="step")
-        ax.hist(pred_real.detach().cpu().numpy(), label="Ground Truth", bins=bins, histtype="stepfilled",alpha=0.3)
+        ax.hist(pred_fake, label="Generated", bins=bins, histtype="step")
+        ax.hist(pred_real, label="Ground Truth", bins=bins, histtype="stepfilled",alpha=0.3)
         ax.legend()
-        plt.ylabel("Counts",fontweight="bold")
-        plt.xlabel("Critic Score",fontweight="bold")
+        plt.ylabel("Counts")
+        plt.xlabel("Critic Score")
         self.summary.add_figure("class_train" if train else "class_val", fig, global_step=step)
         plt.close()
+
+
     def plot_mom(self,step):
         fig, ax = plt.subplots()
         bins=np.linspace(0.7,1.4,30)
-        ax.hist(self.gen.reshape(len(self.gen),self.n_part,3)[:,:,2].sum(1), label="Generated", bins=bins, histtype="step",alpha=1)
+        ax.hist(self.gen.reshape(len(self.gen),self.n,3)[:,:,2].sum(1), label="Generated", bins=bins, histtype="step")
         
-        ax.hist(self.test_set.reshape(len(self.test_set),self.n_part,3)[:,:,2].sum(1), label="Ground Truth", bins=bins, histtype="stepfilled",alpha=0.3)
+        ax.hist(self.test_set.reshape(len(self.test_set),self.n,3)[:,:,2].sum(1), label="Ground Truth", bins=bins, histtype="stepfilled")
         
         ax.legend()
         plt.ylabel("Counts",fontweight="bold")

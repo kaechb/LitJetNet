@@ -21,7 +21,7 @@ from torch.autograd import Variable
 from torch.nn import TransformerEncoderLayer
 from torch.nn import functional as FF
 from torch.nn.functional import leaky_relu, sigmoid
-
+from performer_pytorch import SelfAttention
 from helpers import CosineWarmupScheduler, Scheduler
 from plotting import *
 
@@ -33,7 +33,7 @@ class TransformerEncoderLayer2(torch.nn.TransformerEncoderLayer):
                 dropout,
                 activation):
         super(TransformerEncoderLayer2,self).__init__(d_model=d_model,nhead=nhead,
-                batch_first=batch_first,
+                batch_first=False,
                 norm_first=norm_first,
                 dim_feedforward=dim_feedforward,
                 dropout=dropout,
@@ -96,32 +96,6 @@ class TransformerEncoderLayer2(torch.nn.TransformerEncoderLayer):
             x = self.norm2( self._ff_block(x))
         return x
 
-
-
-    def forward(self, x, mask=None):
-        if self.liverpool:
-            x=self.preembbed(x.reshape(len(x),45)).reshape(len(x),self.n_part,self.n_dim)
-        x = self.embbed(x)
-        x = self.encoder(x, src_key_padding_mask=mask.bool(),)#attention_mask.bool()
-        if self.no_hidden_gen=="more":
-            x = leaky_relu(self.hidden(x))
-            x = self.dropout(x)
-            x = leaky_relu(self.hidden2(x))
-            x = self.dropout(x)
-            x = leaky_relu(self.hidden3(x))
-            x = self.dropout(x)  
-            x=self.out(x)
-        elif self.no_hidden_gen==True:
-            #x = leaky_relu(x)
-            x = self.out2(x)
-        else:
-            x = leaky_relu(self.hidden(x))
-            x = self.dropout(x)
-            x = leaky_relu(self.hidden2(x))
-            x = self.out(x)
-        return x
-
-
 class Disc(nn.Module):
     def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=2,dropout=0.5,mass=False,clf=False,affine_add=True,momentum=False):
         super().__init__()
@@ -133,11 +107,11 @@ class Disc(nn.Module):
         self.affine_add=affine_add
         self.embbed = nn.Linear(n_dim, l_dim)
         self.encoder = nn.TransformerEncoder(
-            TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,
-                                        norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True),
+            TransformerEncoderLayer2(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,batch_first=False,
+                                        norm_first=False,activation=lambda x: leaky_relu(x, 0.2)),
             num_layers=num_layers,
         )
-        self.encoder_class=TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout, norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True)
+        
         # if not self.affine_add:
             
         self.hidden = nn.Linear(l_dim , 2 * hidden)
@@ -151,53 +125,47 @@ class Disc(nn.Module):
 
     def forward(self, x, m=None,p=None, mask=None,noise=0):
         x = self.embbed(x)
-        
-        mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device).bool()
-        # if self.affine_add:  
-        #         # if self.mass:
-        #         # #x = torch.concat((torch.ones_like(x[:, 0, :]).reshape(len(x), 1, -1)*m.reshape(len(x),1,1), x), axis=1)
-        #         #     if self.momentum:
-        #         #         x=torch.concat((self.cond(torch.concat((m.reshape(-1,1),p.reshape(-1,1)),axis=1)).reshape(len(x), 1, -1),x), axis=1)
-                    
-        #             # else:
-        #         x=torch.concat((self.cond(m.reshape(-1,1)).reshape(len(x),1,-1),x),axis=1)
-        #         # elif self.momentum:
-        #         #         x=torch.concat((self.cond(p.reshape(-1,1)).reshape(len(x), 1, -1),x), axis=1)
-        #         # else:
-        #         #     x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
-                
-        # else:
-        x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
-        # assert mask.shape[1]==x.shape[1]
-        
-            
+        with torch.no_grad():
+            mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device).bool()
+            x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
+        # assert mask.shape[1]==x.shape[1]  
+        x = x.transpose(0,1)
         x = self.encoder(x, src_key_padding_mask=mask.bool())#
-     
+        x = x.transpose(0,1)
         x = x[:, 0, :]
-       
-        # if m is not None and not self.affine_add:
-        #     x = torch.concat((m.reshape(len(x), 1), x), axis=1)
-        # if p is not None and not self.affine_add:
-        #     p=p+noise
-        #     x = torch.concat((p.reshape(len(x), 1), x), axis=1)
         x = leaky_relu(self.hidden(x), 0.2)
         x = leaky_relu(self.hidden2(x), 0.2)
         x = self.out(x)
         return x
 
 class Encoder(nn.Module):
-    def __init__(self,config) -> None:
+    def __init__(self,config):
         super().__init__()
-        self.emb=nn.Linear(3,config["emb_dim"])
-        self.hidden=nn.Linear(config["emb_dim"],config["enc_hidden"])
-        self.hidden2=nn.Linear(config["enc_hidden"],config["context_dim"])
-        
-    def forward(self,x):
-        x=self.emb(x).sum(axis=1)
-        x=self.hidden(x)
-        x=leaky_relu(x)
+        self.hidden_nodes = config["hidden"]
+        self.n_dim =config["n_dim"]
+        self.l_dim =config["l_dim"]*config["heads"]
+        self.n_part =config["n_part"]
+        self.embbed =nn.Linear(self.n_dim, self.l_dim)
+        self.encoder = nn.TransformerEncoder(
+            TransformerEncoderLayer2(d_model=self.l_dim,nhead=config["heads"],dim_feedforward=config["hidden"],dropout=config["dropout"],batch_first=False,
+                                        norm_first=False,activation=lambda x: leaky_relu(x, 0.2)),
+            num_layers=config["num_layers"],
+        )
+        self.hidden = nn.Linear(self.l_dim ,config["hidden"])
+        self.hidden2 = nn.Linear( self.hidden_nodes, self.hidden_nodes)
+        self.out = nn.Linear(self.hidden_nodes, config["context_dim"])
 
-        x=self.hidden2(x)
+    def forward(self, x, mask=None):
+        x = self.embbed(x)
+        mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device).bool()
+        x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
+        x = x.transpose(0,1)
+        x = self.encoder(x, src_key_padding_mask=mask.bool())
+        x = x.transpose(0,1)
+        x = x[:, 0, :]
+        x = leaky_relu(self.hidden(x), 0.2)
+        x = leaky_relu(self.hidden2(x), 0.2)
+        x = self.out(x)
         return x
 
 class NF(pl.LightningModule):
@@ -235,7 +203,7 @@ class NF(pl.LightningModule):
         self.n_part=config["n_part"]
         self.alpha = 1
         self.num_batches = int(num_batches)
-        self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],
+        self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"]*config["heads"],num_layers=config["num_layers"],
                             mass=self.config["mass"],num_heads=config["heads"],n_part=config["n_part"],momentum=self.config["momentum"],
                             dropout=config["class_dropout"],affine_add=config["affine_add"]).cuda()
         self.sig = nn.Sigmoid()
@@ -261,12 +229,16 @@ class NF(pl.LightningModule):
         self.num_batches = int(num_batches)
         self.encode= Encoder(config)
         self.build_flow()
-    
+        self.reset_counter=0
         self.automatic_optimization = False
         self.df = pd.DataFrame()
-       
+        self.error=0
+        self.n_current=2
         self.refinement=False
-
+        self.train_g=False
+        self.streak=0
+        self.losses_g=np.ones(5)
+        self.g_counter=0
     def load_datamodule(self, data_module):
         """needed for lightning training to work, it just sets the dataloader for training and validation"""
         self.data_module = data_module
@@ -341,118 +313,160 @@ class NF(pl.LightningModule):
         opt_g = torch.optim.Adam(self.encode.parameters(), lr=self.config["lr_g"], betas=(0, 0.9))
         opt_d = torch.optim.Adam(self.dis_net.parameters(), lr=self.config["lr_d"], betas=(0, 0.9))
         return  [opt_nf,opt_d, opt_g]
-   
-    def training_step(self, batch, batch_idx):
-        """training loop of the model, here all the data is passed forward to a gaussian
-        This is the important part what is happening here. This is all the training we do"""
-        mask = batch[:, self.n_part*self.n_dim:].bool()
-        batch = batch[:, : self.n_part*self.n_dim].reshape(len(batch),self.n_part,self.n_dim)
-        batch[mask] = 0
-        empty=torch.zeros_like(batch).reshape(len(batch)*self.n_part,self.n_dim)
-        empty2=torch.zeros_like(batch).reshape(len(batch)*self.n_part,self.n_dim)
-        flat_batch=batch.reshape(len(batch)*self.n_part,self.n_dim)
-        zero_indices=(flat_batch!=0).all(axis=1)
-        c=torch.repeat_interleave(self.encode(batch),self.n_part,0)
-        c=c[zero_indices]
-        flat_batch=flat_batch[zero_indices,:]
-        opt_nf,opt_d, opt_g = self.optimizers()
-        nf_loss = -self.flow.to(self.device).log_prob(flat_batch,context=c).mean()
+
+    def nf_loss(self,batch,c):
+        nf_loss = -self.flow.to(self.device).log_prob(batch,context=c).mean()
         nf_loss /= self.n_dim
-        opt_nf.zero_grad()
-        self.manual_backward(nf_loss)
-        opt_nf.step()
+        return nf_loss
+
+    def condition(self,batch,indices,mask):
+        c=torch.repeat_interleave(self.encode(batch,mask=mask),self.n_current,0).to(batch.device)
+        return c
+
+    def sample(self,batch,c,indices,mask):
+        empty=torch.zeros((len(c),self.n_dim),device=c.device)
+        rest=torch.ones((len(batch),self.n_part),device=mask.device).bool()
+        rest[:,:self.n_current]=torch.zeros((len(batch),self.n_current),device=mask.device).bool()
+        mask=mask & rest
         self.flow.eval()
         for param in self.flow.parameters():
             param.requires_grad = False
-        try:
-            fake = self.flow.sample(1,c)
-            empty[zero_indices]=fake.reshape(-1,self.n_dim)
-            fake=empty.reshape(len(batch),self.n_part,self.n_dim)
-        except AssertionError:
-            print("Error while sampling")
-            print("c==c:",(c==c).all())
-            return None
+        worked=False
+        counter=0
+        while not worked:
+            try:
+                fake = self.flow.sample(1,c[indices])
+                worked=True
+            except:
+                counter+=1
+                if counter>10:
+                    print("10 errors while sampling, abort")
+                    raise
+                
+        empty[indices,:]=fake.reshape(-1,self.n_dim)
+        fake=torch.zeros((len(mask),self.n_part,self.n_dim),device=mask.device)
+        fake[:,:self.n_current,:]=empty.reshape(-1,self.n_current,self.n_dim)
+        return fake,mask
 
-            
-        pred_real = self.dis_net(batch.reshape(len(batch),self.n_part,self.n_dim), mask=mask)
-        pred_fake = self.dis_net(fake.detach(), mask=mask)
-        target_real = torch.ones_like(pred_real)
-        target_fake = torch.zeros_like(pred_fake)
-        pred = torch.vstack((pred_real, pred_fake))
-        target = torch.vstack((target_real, target_fake))
+    def critic(self,batch,fake,mask,gen=False):
+        if gen:
+            pred = self.dis_net(fake.reshape(len(batch),self.n_part,self.n_dim), mask=mask)
+            target = torch.ones_like(pred)
+        else:
+            pred_fake = self.dis_net(fake.detach(), mask=mask)
+            pred_real = self.dis_net(batch, mask=mask)
+            target_fake = torch.zeros_like(pred_fake)
+            target_real = torch.ones_like(pred_real)
+            pred = torch.vstack((pred_real, pred_fake))
+            target = torch.vstack((target_real, target_fake))
         d_loss = nn.MSELoss()(pred, target).mean()
+        if gen:
+            return d_loss 
+        else:
+            return d_loss,pred_real.detach().cpu().numpy(),pred_fake.detach().cpu().numpy()
+
+    def training_step(self, batch, batch_idx):
+        """training loop of the model, here all the data is passed forward to a gaussian
+        This is the important part what is happening here. This is all the training we do"""
+        opt_nf,opt_d, opt_g = self.optimizers()
+        mask = batch[:, self.n_part*self.n_dim:].bool()
+        if self.error>10:
+            print("10 errors in a row, stopping training")
+            raise
+        batch =batch[:, : self.n_part*self.n_dim].reshape(len(batch),self.n_part,self.n_dim)
+        batch[mask] = 0
+        flat_batch=batch.reshape(len(batch),self.n_part,self.n_dim)[:,:self.n_current,:].reshape(len(batch)*self.n_current,self.n_dim)
+        
+        indices=(flat_batch!=0).all(axis=1)
+        flat_batch=flat_batch[indices,:]
+        c=self.condition(batch.reshape(len(batch),self.n_part,self.n_dim),indices,mask)
+
+        nf_loss=self.nf_loss(flat_batch,c[indices])      
+        opt_nf.zero_grad()
+        self.manual_backward(nf_loss)
+        opt_nf.step()
+
+        c=self.condition(batch.reshape(len(batch),self.n_part,self.n_dim),indices,mask)
+        fake,mask = self.sample(batch,c,indices,mask)
+        d_loss,pred_t,pred_f=self.critic(batch,fake.detach(),mask,gen=False)
+        
         opt_d.zero_grad()
         self.manual_backward(d_loss)
         opt_d.step()
-
-        if True:
-            opt_g.zero_grad()
-            c=torch.repeat_interleave(self.encode(batch.reshape(-1,30,3)),self.n_part,0)
-            c=c[zero_indices]
-            for param in self.dis_net.parameters():
-                param.requires_grad = False
-            try:
-                fake = self.flow.sample(1,c)
-                empty2[zero_indices]=fake.reshape(-1,self.n_dim)
-                fake=empty2.reshape(len(batch),self.n_part,self.n_dim)
-            except AssertionError:
-                print("Error while sampling")
-                print("c==c:",(c==c).all())
-                return None
-            
-            pred_fake = self.dis_net(fake, mask=mask)
-            target_real = torch.ones_like(pred_fake)
-            g_loss=nn.MSELoss()((pred_fake.view(-1)), target_real.view(-1))
+        if d_loss<0.15 and self.reset_counter>1000 and not self.train_g:
+            print("start training with {} particles".format(self.n_current))
+            self.train_g=True
+        else:
+            self.reset_counter+=1
+        if self.train_g:
+            fake,mask = self.sample(batch,c,indices,mask)
+            g_loss=self.critic(batch,fake,mask,gen=True)
+            opt_g.zero_grad()        
             self.manual_backward(g_loss)
             opt_g.step()
             self.log("g_loss", g_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+            self.losses_g[self.g_counter%5]=g_loss.cpu().detach().numpy()
+            self.g_counter+=1
 
-            
+            if np.mean(self.losses_g)<0.3 and self.n_current<self.n_part :
+               
+                self.plot = plotting(model=self,gen=fake[:,:self.n_current,:self.n_dim].detach().cpu(),true=batch[:,:self.n_current,:self.n_dim].detach().cpu(),config=self.config,step=self.global_step,n=self.n_current,
+                    logger=self.logger.experiment,p=self.config["parton"])
+                try:
+                    
+                    self.plot.plot_mass(save=None, bins=10)
+                    self.plot.plot_scores(pred_t,pred_f,True,self.global_step)
+                except:
+                    print("error while plotting pre-increase")
+                    traceback.print_exc()
+                self.n_current+=1
+                print("increased number particles to ",self.n_current)
+                self.reset_counter=0
+                self.train_g=False
+               
+              
+         
+
         self.log("logprob", nf_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
         self.log("d_loss", d_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
-        for param in self.dis_net.parameters():
-                param.requires_grad = True
         for param in self.flow.parameters():
             param.requires_grad = True
+        
               
 
     def validation_step(self, batch, batch_idx):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
         mask = batch[:, 90:].cpu().bool()
+        rest=torch.ones((len(batch),self.n_part),device=mask.device).bool()
+        rest[:,:self.n_current]=torch.zeros((len(batch),self.n_current),device=mask.device).bool()
+        mask=mask & rest
         batch = batch[:, :90].cpu()
-        mask_test=self.sample_n(mask).bool()
-        
+        empty = torch.zeros_like(batch)
         self.encode=self.encode.to("cpu")
         self.flow.eval()
         batch = batch.to("cpu")
         self.flow = self.flow.to("cpu")
-        empty=torch.zeros_like(batch).reshape(len(batch)*self.n_part,self.n_dim)
         
-        flat_batch=batch.reshape(len(batch)*self.n_part,self.n_dim)
-        zero_indices=(flat_batch!=0).all(axis=1)
-        c=torch.repeat_interleave(self.encode(batch.reshape(-1,30,3)),self.n_part,0)
-
-        c=c[zero_indices]
+        
+        flat_batch=batch.reshape(len(batch),self.n_part,self.n_dim)[:,:self.n_current,:].reshape(len(batch)*self.n_current,self.n_dim)
+        indices=(flat_batch!=0).all(axis=1)
+        c=self.condition(batch.reshape(len(batch),self.n_part,self.n_dim),indices,mask)
+        fake,mask = self.sample(batch,c,indices,mask)
 
         
         with torch.no_grad():
-            logprob = -self.flow.log_prob(flat_batch[zero_indices],context=c).mean() / self.n_dim
-            z = self.flow.sample( 1,context=c)
-            empty[zero_indices]=z.reshape(-1,self.n_dim)
-            z=empty.reshape(len(batch),self.n_part,self.n_dim)
+            logprob = -self.flow.log_prob(flat_batch[indices],context=c[indices]).mean() / self.n_dim
             self.data_module.scaler = self.data_module.scaler.to(batch.device)
-
-            z_scaled=self.data_module.scaler.inverse_transform(z)
+            z_scaled=self.data_module.scaler.inverse_transform(fake)
             true_scaled=self.data_module.scaler.inverse_transform(batch.reshape(len(batch),self.n_part, self.n_dim) )
-            z_scaled[mask_test]=0
-        m_t = mass(true_scaled)
-        m_c = mass(z_scaled)
+            z_scaled[mask]=0
+        m_t = mass(true_scaled[:,:self.n_current,:self.n_dim])
+        m_c = mass(z_scaled[:,:self.n_current,:self.n_dim])
         
-        for i in range(30):
-            
+        for i in range(self.n_part):
             z_scaled[z_scaled[:, i,2] < 0, i,2] = 0
         # Some metrics we track
-        cov, mmd = cov_mmd( true_scaled,z_scaled, use_tqdm=False)
+        cov, mmd = cov_mmd( true_scaled[:,:self.n_current],z_scaled[:,:self.n_current], use_tqdm=False)
         
         try:
             
@@ -460,9 +474,9 @@ class NF(pl.LightningModule):
         except:
             fpndv = 1000
 
-        w1m_ = w1m(z_scaled, true_scaled)[0]
-        w1p_ = w1p(z_scaled, true_scaled)[0]
-        w1efp_ = w1efp(z_scaled, true_scaled)[0]
+        w1m_ = w1m(z_scaled[:,:self.n_current], true_scaled[:,:self.n_current])[0]
+        w1p_ = w1p(z_scaled[:,:self.n_current], true_scaled[:,:self.n_current])[0]
+        w1efp_ = w1efp(z_scaled[:,:self.n_current], true_scaled[:,:self.n_current])[0]
 
         
         self.w1ms.append(w1m_)
@@ -470,8 +484,6 @@ class NF(pl.LightningModule):
         temp = {"val_logprob": float(logprob.numpy()),"val_fpnd": fpndv,"val_mmd": mmd,"val_cov": cov,"val_w1m": w1m_,
                 "val_w1efp": w1efp_,"val_w1p": w1p_,"step": self.global_step,}
         print("epoch {}: ".format(self.current_epoch), temp)
-       
-        
         if self.hyperopt and self.global_step > 3:
             try:
                 self._results(temp)
@@ -486,15 +498,14 @@ class NF(pl.LightningModule):
         self.log("val_w1efp", w1efp_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_logprob", logprob, prog_bar=True, logger=True)
         self.log("val_cov", cov, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        
         self.log("val_fpnd", fpndv, prog_bar=True, logger=True, on_step=False, on_epoch=True)
         self.log("val_mmd", mmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        
-        self.plot = plotting(model=self,gen=z_scaled.reshape(-1,self.n_part,self.n_dim),true=true_scaled.reshape(-1,self.n_part,self.n_dim),config=self.config,step=self.global_step,
+        self.plot = plotting(model=self,gen=z_scaled[:,:self.n_current,:self.n_dim],true=true_scaled[:,:self.n_current,:self.n_dim],config=self.config,step=self.global_step,n=self.n_current,
             logger=self.logger.experiment,p=self.config["parton"])
         self.plot.plot_mom(self.global_step)
         try:
-            self.plot.plot_mass(m=m_c.cpu().numpy(), m_t=m_t.cpu().numpy(), save=None, bins=50, quantile=True, plot_vline=False)
+            
+            self.plot.plot_mass( save=None, bins=50)
             # self.plot.plot_2d(save=True)
         #     self.plot.var_part(true=true[:,:self.n_dim],gen=gen_corr[:,:self.n_dim],true_n=n_true,gen_n=n_gen_corr,
         #                          m_true=m_t,m_gen=m_test ,save=True)

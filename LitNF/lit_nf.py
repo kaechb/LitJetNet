@@ -257,6 +257,7 @@ class TransGan(pl.LightningModule):
         self.n_dim = self.config["n_dim"]
         self.n_part = config["n_part"]
         self.alpha = 1
+        self.flow=NF(config=config,num_batches=num_batches).load_from_checkpoint(config["load_ckpt"])
         self.num_batches = int(num_batches)
         self.gen_net = Gen(n_dim=self.n_dim,hidden=config["hidden"],num_layers=config["num_layers"],dropout=config["dropout"],no_hidden=config["no_hidden_gen"],n_part=config["n_part"],l_dim=config["l_dim"],num_heads=config["heads"],liverpool=config["liverpool"]).cuda()
         self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],
@@ -337,13 +338,23 @@ class TransGan(pl.LightningModule):
         on the generative sample and to compare to the simulated one, we need to inverse the scaling before calculating the mass
         because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
         assert mask.dtype==torch.bool
+        empty=torch.zeros_like(batch).reshape(len(batch)*self.n_part,self.n_dim)
+        flat_batch=batch.reshape(len(batch)*self.n_part,self.n_dim)
+        zero_indices=(flat_batch!=0).all(axis=1)
+        c=torch.repeat_interleave(self.encode(batch),self.n_part,0)
+        c=c[zero_indices]
         batch_temp=batch.unsqueeze(-1).repeat(1,1,1,30)
-        if self.config["liverpool"]:
-            z=torch.normal(torch.zeros((len(batch),45),device=batch.device))
+        if self.config["flow"]:
+
+            fake = self.flow.sample(1,c)
+            empty[zero_indices]=fake.reshape(-1,self.n_dim)
+            fake=empty.reshape(len(batch),self.n_part,self.n_dim)
+        if self.config["add_corr"]:
+            fake = fake+self.gen_net(fake, mask=mask)
         else:
-            z=torch.normal(torch.zeros((len(batch),self.n_part,self.n_dim),device=batch.device))
-        fake = self.gen_net(z, mask=mask)
-        # fake = fake*((~mask).reshape(len(batch),30,1).float()) #somehow this gives nangrad
+            fake = self.gen_net(fake, mask=mask)
+
+
         fake[mask]=0
         if scale:
             fake_scaled = fake.clone()
