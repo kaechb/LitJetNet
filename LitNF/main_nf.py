@@ -13,7 +13,6 @@ from pytorch_lightning.loggers import CometLogger, TensorBoardLogger
 from pytorch_lightning.tuner.tuning import Tuner
 from scipy import stats
 from torch.nn import functional as FF
-
 from helpers import *
 
 if True:
@@ -106,7 +105,7 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    parton=np.random.choice(["t"])#"q","g",
+    parton=np.random.choice(["q","g","t"])#
     
     best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
     with open(best_hparam, 'r') as stream:
@@ -115,51 +114,19 @@ if __name__ == "__main__":
     delete=['autoreg',"disc","fc"]
     for key in delete:
         config.pop(key, None)
-    hyperopt=True
-    config["val_check"]=50
     config["parton"] =parton
     config["particle_scaling"]=True
-    if hyperopt:
 
-        # config["no_hidden"]=np.random.choice([True,False,"more"])
-        # config["no_hidden"]=config["no_hidden"]=="True" or config["no_hidden"]=="more"
-
-       
-
-        config["coupling_layers"]=np.random.randint(low=2,high=5)
-        config["lr_nf"]=10.**np.random.choice([-3,-3.5,-4,-4.5,-5])
-        config["bins"]=np.random.randint(low=3,high=8)
-
-        #config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
-        config["warmup"]=np.random.choice([800,1200,1600])
-        config["sched"]=np.random.choice(["cosine2","linear",None])
-        
-       
-        config["batch_size"]=int(np.random.choice([128,256,1024 ]))    # config["opt"]="Adam"
-        config["emb_dim"]=int(np.random.choice([5,10,30]))    # config["opt"]="Adam"
-        config["enc_hidden"]=int(np.random.choice([128,256,1024]))    # config["opt"]="Adam"
-        config["context_dim"]=int(np.random.choice([5,10,30]))    # config["opt"]="Adam"
-        config["dropout"]=np.random.choice([0.15,0.05,0.01])    
-        config["momentum"]=np.random.choice([False])
-        config["class_dropout"]=np.random.choice([0.1,0.15,0.05,0.01])    
-        config["network_nodes_nf"]=np.random.choice([32,64,128])
-        config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
-        config["lr_g"]=np.random.choice([0.0003,0.0001])  
-        config["ratio"]=np.random.choice([0.9,1,1.3,])
-
-        config["l_dim"]=np.random.choice([25,20,30])
-        
-        config["hidden"]=np.random.choice([512,756,1024])
-
-        config["val_check"]=25
-        config["max_epochs"]=np.random.choice([4800,6000])    
-        config["name"]="nf_"+parton
-    else:
-        # config["last_clf"]=True
-        # config["gen_mask"]=True
-        print("hyperopt off"*100)
-        config["name"]="bestever_"+parton#config["parton"]
-        #config["freq"]=6    # config["opt"]="Adam"
+    config["coupling_layers"]=np.random.randint(low=2,high=5)
+    config["lr_nf"]=10.**np.random.choice([-3,-3.5,-4,-4.5,-5])
+    config["bins"]=np.random.randint(low=3,high=8)
+    config["batch_size"]=int(np.random.choice([128,256,1024 ]))    # config["opt"]="Adam"
+    config["dropout"]=np.random.choice([0.15,0.05,0.01])     
+    config["network_nodes_nf"]=np.random.choice([32,64,128])
+    config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
+    config["val_check"]=25
+    config["max_epochs"]=np.random.choice([4800,6000])    
+    config["name"]="newage_"+parton
     for k, v in config.items():
         print(k,": ", v)
     if len(sys.argv) > 2:

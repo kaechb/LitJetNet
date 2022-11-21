@@ -73,6 +73,13 @@ import matplotlib as mpl
 # import proplot as pplt
 # fig, axs = pplt.show_cycles(rasterized=True)
 # from torch.nn import MultiheadAttention,TransformerEncoder,TransformerEncoderLayer
+def canonical(p):
+    px=torch.cos(p[:,:,1])*p[:,:,2]
+    py=torch.sin(p[:,:,1])*p[:,:,2]
+    pz=torch.sinh(p[:,:,0])*p[:,:,2]
+    E=torch.sqrt(px**2+py**2+pz**2)
+    v=torch.stack((px,py,pz,E),dim=-1)
+    return v
 def mass(p):
     if not torch.is_tensor(p):
         p=torch.tensor(p)
