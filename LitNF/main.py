@@ -48,18 +48,18 @@ def train(config,  load_ckpt=False, i=0, root=None):
             monitor="val_fpnd",
             save_top_k=10,
             filename="{epoch}-{val_fpnd:.2f}-{val_w1m:.4f}--{val_w1efp:.6f}",
-            dirpath=root,
+            #dirpath=root,
             every_n_epochs=10,
         )
     ]
 
-    if  load_ckpt:
+    # if  load_ckpt:
         
-        model = TransGan.load_from_checkpoint(load_ckpt
-        )
+    #     model = TransGan.load_from_checkpoint(load_ckpt
+    #     )
 
-        model.data_module = data_module
-        model.config["ckpt"]=True
+    #     model.data_module = data_module
+    #     model.config["ckpt"]=True
     if "pretrain" in config.keys() and config["pretrain"]:
         model.config["lr_g"]=config["lr_g"]
         model.config["lr_d"]=config["lr_d"]
@@ -86,7 +86,7 @@ def train(config,  load_ckpt=False, i=0, root=None):
     trainer = pl.Trainer(
         gpus=1,
         logger=logger,
-        log_every_n_steps=500,  # auto_scale_batch_size="binsearch",
+        log_every_n_steps=data_module.num_batches//2,  # auto_scale_batch_size="binsearch",
         max_epochs=config["max_epochs"],
         callbacks=callbacks,
         progress_bar_refresh_rate=0,
@@ -117,7 +117,7 @@ if __name__ == "__main__":
         "lr_g",
         "ratio"
     ]
-    parton=np.random.choice(["q","g","t"])#"q","g",
+    parton=np.random.choice(["q"])#"q","g",
     
     best_hparam="/home/kaechben/JetNet_NF/LitJetNet/LitNF/bestever_{}/hparams.yaml".format(parton)
     with open(best_hparam, 'r') as stream:
@@ -129,36 +129,25 @@ if __name__ == "__main__":
     hyperopt=True
     config["val_check"]=50
     config["parton"] =parton
-    config["pretrain"]=np.random.choice([True,False])
-    if parton=="q" and not config["pretrain"] or config["pretrain"]==True and not parton=="q":
-        ckpt="/beegfs/desy/user/kaechben/pretrainedNF_q/epoch=249-val_fpnd=0.22-val_w1m=0.0016--val_w1efp=0.000011.ckpt" 
-    elif parton=="g" and not config["pretrain"] or config["pretrain"]==True and not parton=="g":
-        ckpt="/beegfs/desy/user/kaechben/pretrainedNF_g/epoch=799-val_fpnd=0.17-val_w1m=0.0009--val_w1efp=0.000009.ckpt"
-    elif parton=="t" and not config["pretrain"] or config["pretrain"]==True and not parton=="t":
-        ckpt="/beegfs/desy/user/kaechben/pretrainedNF_t/epoch=2749-val_fpnd=0.21-val_w1m=0.0007--val_w1efp=0.000018.ckpt"
-    else:
-        ckpt=False
+    config["pretrain"]=np.random.choice([False])
+
     if hyperopt:
 
         # config["no_hidden"]=np.random.choice([True,False,"more"])
         # config["no_hidden"]=config["no_hidden"]=="True" or config["no_hidden"]=="more"
 
-        config["gen_mask"]=True
-        config["affine_add"]=np.random.choice([True,False])
-
         
         #config["max_epochs"]=int(config["max_epochs"])#*np.random.choice([2]))
-        config["warmup"]=np.random.choice([800,1200,1600])
+        
         config["sched"]=np.random.choice(["cosine2","linear",None])
-        config["mass"]=np.random.choice([True,False])
-        config["momentum"]=np.random.choice([True,False])
-        config["freq"]=np.random.choice([5])    # config["opt"]="Adam"
+        
+        config["freq"]=np.random.choice([1,3,5,7])    # config["opt"]="Adam"
         config["batch_size"]=int(np.random.choice([128,1024]))    # config["opt"]="Adam"
         config["dropout"]=np.random.choice([0.1,0.15,0.05,0.01])    
-        config["opt"]=np.random.choice(["Adam","RMSprop"])#"AdamW",
+        config["opt"]=np.random.choice(["Adam","mixed"])#"AdamW",
         config["lr_g"]=np.random.choice([0.0003,0.0001])  
         config["ratio"]=np.random.choice([0.9,1,1.1,])
-        config["context_features"]=np.random.choice([0])
+        
         config["num_layers"]=np.random.choice([4,5,6,7])
         if config["num_layers"]>6:
             config["hidden"]=np.random.choice([256,128])
@@ -173,9 +162,10 @@ if __name__ == "__main__":
         config["name"] = config["name"]+config["parton"]
         config["no_hidden_gen"]=np.random.choice([True,False,"more"])
         config["no_hidden"]=np.random.choice([True,"more"])
-        config["max_epochs"]=np.random.choice([4800,6000])    
-        config["name"]="continueTrain_"+parton
-        config["last_clf"]=False
+        config["max_epochs"]=np.random.choice([1200,1800])  
+        config["warmup"]=int(np.random.choice([0.4,0.6,0.8])*config["max_epochs"])
+        config["name"]="pf_"+parton
+        config["load_ckpt"]= "/beegfs/desy/user/kaechben/pointflow_q/epoch=49-val_fpnd=182.38-val_w1m=0.0148-val_w1efp=0.000054-val_w1p=0.00501.ckpt"
     else:
         # config["last_clf"]=True
         # config["gen_mask"]=True
@@ -192,5 +182,5 @@ if __name__ == "__main__":
         for col in cols:
             print('"' + col + '":' + str(config[col]))
 
-        train(config, root=root,load_ckpt=ckpt)
+        train(config, root=root,)#load_ckpt=ckpt
    

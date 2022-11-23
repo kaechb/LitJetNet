@@ -15,7 +15,7 @@ module purge
 module load maxwell gcc/9.3
 module load anaconda3/5.2
 . conda-init
-conda activate jetnet
+conda activate jetnet2
 
 
 # nodes=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
