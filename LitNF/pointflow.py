@@ -78,6 +78,7 @@ class PF(pl.LightningModule):
         self.error=0
         self.nf=True
         
+        
     def load_datamodule(self, data_module):
         """needed for lightning training to work, it just sets the dataloader for training and validation"""
         self.data_module = data_module

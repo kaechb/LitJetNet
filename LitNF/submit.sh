@@ -9,6 +9,7 @@
 #SBATCH --error=%j.err                # File to which STDERR will be written
 #SBATCH --mail-type=END                           # Type of email notification- BEGIN,END,FAIL,ALL
 #SBATCH --mail-user=max.muster@desy.de            # Email to which notifications will be sent. It defaults to <userid@mail.desy.de> if none is set.
+export WANDB_API_KEY=f39ea2cc30c7a621000b7fa3355a8c0e848a91d3
 unset LD_PRELOAD
 source /etc/profile.d/modules.sh
 module purge
@@ -16,7 +17,7 @@ module load maxwell gcc/9.3
 module load anaconda3/5.2
 . conda-init
 conda activate jetnet2
-
+wandb login f39ea2cc30c7a621000b7fa3355a8c0e848a91d3
 
 # nodes=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
 

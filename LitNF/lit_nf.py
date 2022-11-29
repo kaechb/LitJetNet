@@ -1,7 +1,7 @@
 import os
+import sys
 import time
 import traceback
-from nf import NF
 
 import matplotlib.pyplot as plt
 import nflows as nf
@@ -22,14 +22,33 @@ from torch.autograd import Variable
 from torch.nn import TransformerEncoderLayer
 from torch.nn import functional as FF
 from torch.nn.functional import leaky_relu, sigmoid
-from pointflow import PF
+
 from helpers import CosineWarmupScheduler, Scheduler
-from plotting import *
+from nf import NF
+from pointflow import PF
+
+sys.path.insert(1, "/home/kaechben/plots")
+
+from plotswb import *
 
 
 class TransformerEncoderLayer2(torch.nn.TransformerEncoderLayer):
-    def __init__(self):
-        super(TransformerEncoderLayer2,self).__init__()
+    def __init__(self,d_model=10,
+                nhead=4,
+                dim_feedforward=512,
+                dropout=0.5,
+                batch_first=True,
+                activation="relu",
+                norm_first=True):
+        super().__init__(d_model=d_model,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                batch_first=True,
+                activation=lambda x: leaky_relu(x, 0.2),
+                norm_first=norm_first)
+        self.norm1=nn.BatchNorm1d(num_features=d_model)
+        self.norm2=nn.BatchNorm1d(num_features=d_model)
     def forward(self, src: Tensor, src_mask= None,src_key_padding_mask = None):
         if (src.dim() == 3 and not self.norm_first and not self.training and
             self.self_attn.batch_first and
@@ -80,34 +99,50 @@ class TransformerEncoderLayer2(torch.nn.TransformerEncoderLayer):
                 )
         x = src
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
-            x = x + self._ff_block(self.norm2(x))
+            x = x + self._sa_block(self.norm1(x.permute(0,2,1)).permute(0,2,1), src_mask, src_key_padding_mask)
+            x = x + self._ff_block(self.norm2(x.permute(0,2,1)).permute(0,2,1))
         else:
-            x = self.norm1( self._sa_block(x, src_mask, src_key_padding_mask))
-            x = self.norm2( self._ff_block(x))
+            x = self.norm1(self._sa_block(x, src_mask, src_key_padding_mask).permute(0,2,1)).permute(0,2,1)
+            x = self.norm2( self._ff_block(x).permute(0,2,1)).permute(0,2,1)
         return x
 
 class Gen(nn.Module):
-    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,n_part=5,dropout=0.5,no_hidden=True):
+    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,norm_first=False,dropout=0.5,no_hidden=True,bn=False,feat=True):
         super().__init__()
         self.hidden_nodes = hidden
         self.n_dim = n_dim
         self.l_dim = l_dim
-        self.n_part = n_part
+        
         self.no_hidden_gen = no_hidden
         self.embbed = nn.Linear(n_dim, l_dim)
-        self.encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
+        if bn:
+
+            self.encoder = nn.TransformerEncoder(
+            TransformerEncoderLayer2(
                 d_model=l_dim,
                 nhead=num_heads,
-                batch_first=True,
-                norm_first=False,
                 dim_feedforward=hidden,
                 dropout=dropout,
-                activation= "relu"
+                batch_first=True,
+                activation=lambda x: leaky_relu(x, 0.2),
+                norm_first=norm_first
             ),
             num_layers=num_layers,
         )
+        else:
+
+            self.encoder = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    d_model=l_dim,
+                    nhead=num_heads,
+                    dim_feedforward=hidden,
+                    dropout=dropout,
+                    batch_first=True,
+                    activation=lambda x: leaky_relu(x, 0.2),
+                    norm_first=norm_first
+                ),
+                num_layers=num_layers,
+            )
         if not self.no_hidden_gen==True:
             self.hidden = nn.Linear(l_dim, hidden)
             self.hidden2 = nn.Linear(hidden, hidden)
@@ -120,9 +155,8 @@ class Gen(nn.Module):
         
 
     def forward(self, x, mask=None):
-
         x = self.embbed(x)
-        x = self.encoder(x, src_key_padding_mask=mask.bool(),)#attention_mask.bool()
+        x = self.encoder(x, src_key_padding_mask=mask.bool())#attention_mask.bool()
         if self.no_hidden_gen=="more":
             x = leaky_relu(self.hidden(x))
             x = self.dropout(x)
@@ -143,32 +177,46 @@ class Gen(nn.Module):
 
 
 class Disc(nn.Module):
-    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,dropout=0.5):
+    def __init__(self,n_dim=3,l_dim=10,hidden=300,num_layers=3,num_heads=1,dropout=0.5,norm_first=False,bn=False,feat=False):
         super().__init__()
         self.hidden_nodes = hidden
         self.n_dim = n_dim
         self.l_dim = l_dim
         self.embbed = nn.Linear(n_dim, l_dim)
-        self.encoder = nn.TransformerEncoder(
-            TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,
-                                        norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True),
+        if bn:
+
+            self.encoder=nn.TransformerEncoder(TransformerEncoderLayer2(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,
+            norm_first=norm_first,activation=lambda x: leaky_relu(x, 0.2),batch_first=True),
+         
             num_layers=num_layers,
         )
-        self.encoder_class=TransformerEncoderLayer(d_model=self.l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout, norm_first=False,activation=lambda x: leaky_relu(x, 0.2),batch_first=True)
-        self.hidden = nn.Linear(l_dim , 2 * hidden)
-        self.hidden2 = nn.Linear(2 * hidden, hidden)
-        self.out = nn.Linear(hidden, 1)
+        else:
+
+            self.encoder = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(d_model=l_dim,nhead=num_heads,dim_feedforward=hidden,dropout=dropout,batch_first=True,
+                activation=lambda x: leaky_relu(x, 0.2),norm_first=norm_first),
+                num_layers=num_layers,
+            )
+       
+        self.hidden = nn.Linear(l_dim , 2 * hidden if not feat else 2*l_dim)
+        self.hidden2 = nn.Linear(2 * hidden if not feat else 2*l_dim, hidden if not feat else l_dim)
+        self.out = nn.Linear(hidden if not feat else l_dim, 1)
         
-    def forward(self, x, m=None,p=None, mask=None,noise=0):
+    def forward(self, x, mask=None,noise=0,feat=False):
         x = self.embbed(x)
         mask = torch.concat((torch.zeros_like((mask[:, 0]).reshape(len(x), 1)), mask), dim=1).to(x.device).bool()
         x = torch.concat((torch.zeros_like(x[:, 0, :]).reshape(len(x), 1, -1), x), axis=1)
         x = self.encoder(x, src_key_padding_mask=mask.bool())        
         x = x[:, 0, :]
-        x = leaky_relu(self.hidden(x), 0.2)
-        x = leaky_relu(self.hidden2(x), 0.2)
-        x = self.out(x)
-        return x
+        xx = leaky_relu(self.hidden(x), 0.2)
+        
+        xxx = leaky_relu(self.hidden2(xx), 0.2)
+        
+        x = self.out(xxx)
+        if not feat:
+            return x
+        else:
+            return x,xx,xxx
 
 
 class TransGan(pl.LightningModule):
@@ -197,15 +245,13 @@ class TransGan(pl.LightningModule):
         super().__init__()
         self.hyperopt = True
         self.start = time.time()
-        
-
         self.config = config
         self.automatic_optimization = False
         self.freq_d = config["freq"]
         self.wgan = config["wgan"]
         # Loss function of the Normalizing flows
         self.logprobs = []
-        self.n_part = config["n_part"]
+
         self.save_hyperparameters()
         self.flows = []
         self.fpnds = []
@@ -213,22 +259,20 @@ class TransGan(pl.LightningModule):
         self.stop_train=False
         self.n_dim = self.config["n_dim"]
         self.n_part = config["n_part"]
+        self.n_current = 2
         self.alpha = 1
         self.num_batches = int(num_batches)
         #self.build_flow()
-       
+        
         nf=PF.load_from_checkpoint(config["load_ckpt"])
         #self.config["context_features"]=nf.config["context_features"]
         self.flow=nf.flow
         self.flow.eval()
-
-        
-        self.gen_net = Gen(n_dim=self.n_dim,hidden=config["hidden"],num_layers=config["num_layers"],dropout=config["dropout"],
-                            no_hidden=config["no_hidden_gen"],n_part=config["n_part"],l_dim=config["l_dim"],
-                            num_heads=config["heads"]).cuda()
-        self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"],
-                          num_heads=config["heads"],
-                            dropout=config["dropout"]).cuda()
+        self.train_gen=False
+        self.d_losses=torch.ones(5)
+        self.mse=nn.MSELoss()
+        self.gen_net = Gen(n_dim=self.n_dim,hidden=config["hidden"],num_layers=config["num_layers"],dropout=config["dropout"],no_hidden=config["no_hidden_gen"],l_dim=config["l_dim"],num_heads=config["heads"],  norm_first=config["normfirst"],bn=config["bn"]).cuda()
+        self.dis_net = Disc(n_dim=self.n_dim,hidden=config["hidden"],l_dim=config["l_dim"],num_layers=config["num_layers"], norm_first=config["normfirst"],num_heads=config["heads"],dropout=config["dropout"],bn=config["bn"],feat=config["featurematching"]).cuda()
         self.sig = nn.Sigmoid()
         self.df = pd.DataFrame()
         for p in self.dis_net.parameters():
@@ -238,8 +282,9 @@ class TransGan(pl.LightningModule):
         for p in self.gen_net.parameters():
             if p.dim() > 1:
                 nn.init.xavier_normal(p)
-        self.train_nf = config["max_epochs"] // config["frac_pretrain"]
+        self.train_nf = int(config["max_epochs"] * config["frac_pretrain"])
         self.refinement=False
+        self.counter=0
 
     def load_datamodule(self, data_module):
         """needed for lightning training to work, it just sets the dataloader for training and validation"""
@@ -262,23 +307,23 @@ class TransGan(pl.LightningModule):
         self.df = pd.concat([self.df,pd.DataFrame([temp],index=[self.current_epoch])])
         self.df.to_csv(self.logger.log_dir + "result.csv", index_label=["index"])
 
-    def on_after_backward(self) -> None:
-        """This is a genious little hook, sometimes my model dies, i have no clue why. This saves the training from crashing and continues"""
-        valid_gradients = False
-        for name, param in self.named_parameters():
-            if param.grad is not None:
-                valid_gradients = not (torch.isnan(param.grad).any() or torch.isinf(param.grad).any())
-                if not valid_gradients:
-                    break
-        if not valid_gradients:
-            print("not valid grads", self.counter)
-            self.zero_grad()
-            self.counter += 1
-            if self.counter > 5:
-                raise ValueError("5 nangrads in a row")
-            self.stop_train=True
-        else:
-            self.counter = 0
+    # def on_after_backward(self) -> None:
+    #     """This is a genious little hook, sometimes my model dies, i have no clue why. This saves the training from crashing and continues"""
+    #     valid_gradients = False
+    #     for name, param in self.named_parameters():
+    #         if param.grad is not None:
+    #             valid_gradients = not (torch.isnan(param.grad).any() or torch.isinf(param.grad).any())
+    #             if not valid_gradients:
+    #                 break
+    #     if not valid_gradients:
+    #         print("not valid grads", self.counter)
+    #         self.zero_grad()
+    #         self.counter += 1
+    #         if self.counter > 5:
+    #             raise ValueError("5 nangrads in a row")
+    #         self.stop_train=True
+    #     else:
+    #         self.counter = 0
     
     def sample_n(self, mask):
         #Samples a mask where the zero padded particles are True, rest False
@@ -286,7 +331,7 @@ class TransGan(pl.LightningModule):
         n, counts = np.unique(self.data_module.n, return_counts=True)
         counts_prob = torch.tensor(counts / len(self.data_module.n) )
         n_test=n[torch.multinomial(counts_prob,replacement=True,num_samples=(len(mask)))] 
-        indices = torch.arange(30, device=mask.device)
+        indices = torch.arange(self.n_current, device=mask.device)
         mask_test = (indices.view(1, -1) < torch.tensor(n_test).view(-1, 1))      
         mask_test=~mask_test.bool()
         return (mask_test)
@@ -299,11 +344,20 @@ class TransGan(pl.LightningModule):
         on the generative sample and to compare to the simulated one, we need to inverse the scaling before calculating the mass
         because calculating the mass is a non linear transformation and does not commute with the mass calculation"""
         assert mask.dtype==torch.bool
+        self.flow.eval()
         with torch.no_grad():
-
-            z = self.flow.sample(len(batch)*self.n_part).reshape(len(batch), 
-            self.n_part, self.n_dim)
+            if self.config["add_corr"]:
+            #print("start flow sample")
+                z = self.flow.sample(len(batch)*self.n_current).reshape(len(batch), 
+                self.n_current, self.n_dim)
+            else:
+                z = torch.normal(torch.zeros(batch.shape,device=batch.device),torch.ones(batch.shape,device=batch.device))
+            #print("end")
+        #print("start trans sample")
+        
         fake = z + self.gen_net(z, mask=mask)
+        #print("end")
+
         # fake = fake*((~mask).reshape(len(batch),30,1).float()) #somehow this gives nangrad
         fake[mask]=0
         if scale:
@@ -321,50 +375,48 @@ class TransGan(pl.LightningModule):
         else:
             return fake
 
-    def configure_optimizers(self):
-        self.losses = []
-        # mlosses are initialized with None during the time it is not turned on, makes it easier to plot
-
-        if self.config["opt"] == "Adam":
-            opt_g = torch.optim.Adam(self.gen_net.parameters(), lr=self.config["lr_g"], betas=(0, 0.9))
-            opt_d = torch.optim.Adam(self.dis_net.parameters(), lr=self.config["lr_d"], betas=(0, 0.9))
-        elif self.config["opt"] == "mixed":
-            opt_g = torch.optim.Adam(
-                self.gen_net.parameters(), lr=self.config["lr_g"], betas=(0, 0.9)
-            )
-            opt_d = torch.optim.SGD(self.dis_net.parameters(), lr=self.config["lr_d"])
-        else:
-            opt_g = torch.optim.RMSprop(self.gen_net.parameters(), lr=self.config["lr_g"])
-            opt_d = torch.optim.RMSprop(self.dis_net.parameters(), lr=self.config["lr_d"])
+    def scheduler(self,opt_g,opt_d):
         if self.config["sched"] == "cosine":
 
-            max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            # if self.config["bullshitbingo2"]:
-            #     self.freq_d+=1
-            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches // (self.freq_d-1)
-            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_d)
-            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_g)
+           
+            max_iter = (self.config["max_epochs"] - self.train_nf) * self.num_batches -self.global_step
+            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter)
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter)
             # if self.config["bullshitbingo2"]:
             #     self.freq_d-=1
         elif self.config["sched"] == "cosine2":
-            max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            # if self.config["bullshitbingo2"]:
-            #     self.freq_d+=1
-            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//(self.freq_d-1)
-            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter_d//3 )#15,150 // 3
-            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches //(self.freq_d-1), max_iters=max_iter_g//3)#  // 3
+            
+            max_iter = (self.config["max_epochs"] - self.train_nf) * self.num_batches//3-self.global_step
+            lr_scheduler_d = CosineWarmupScheduler(opt_d, warmup=self.config["warmup"] * self.num_batches, max_iters=max_iter )#15,150 // 3
+            lr_scheduler_g = CosineWarmupScheduler(opt_g, warmup=self.config["warmup"] * self.num_batches , max_iters=max_iter)#  // 3
             # if self.config["bullshitbingo2"]:
             #     self.freq_d-=1
         elif self.config["sched"] == "linear":
-            max_iter_d = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches
-            
-            max_iter_g = (self.config["max_epochs"] - self.train_nf) * self.num_batches//(self.freq_d-1)
+            max_iter = (self.config["max_epochs"] - self.train_nf // 2) * self.num_batches-self.global_step
+          
             lr_scheduler_d = Scheduler(opt_d,dim_embed=self.config["l_dim"], warmup_steps=self.config["warmup"] * self.num_batches )#15,150 // 3
-            lr_scheduler_g = Scheduler(opt_g, dim_embed=self.config["l_dim"], warmup_steps=self.config["warmup"] * self.num_batches //(self.freq_d-1))#  // 3
+            lr_scheduler_g = Scheduler(opt_g, dim_embed=self.config["l_dim"], warmup_steps=self.config["warmup"] * self.num_batches )#  // 3
 
         else:
             lr_scheduler_d = None
             lr_scheduler_g = None
+        return lr_scheduler_d,lr_scheduler_g
+
+    def configure_optimizers(self):
+        self.losses = []
+        # mlosses are initialized with None during the time it is not turned on, makes it easier to plot
+        if self.config["opt"] == "Adam":
+            opt_g = torch.optim.Adam(self.gen_net.parameters(), lr=self.config["lr_g"], betas=(0, 0.9))
+            opt_d = torch.optim.Adam(self.dis_net.parameters(), lr=self.config["lr_d"], betas=(0, 0.9))
+        elif self.config["opt"] == "mixed" and False:
+            opt_g = torch.optim.Adam(
+                self.gen_net.parameters(), lr=self.config["lr_g"], betas=(0, 0.9)
+            )
+            opt_d = torch.optim.SGD(self.dis_net.parameters(), lr=self.config["lr_d"])#TRAINING WITH SGD DOES NOT WORK AT ALL
+        else:
+            opt_g = torch.optim.RMSprop(self.gen_net.parameters(), lr=self.config["lr_g"])
+            opt_d = torch.optim.RMSprop(self.dis_net.parameters(), lr=self.config["lr_d"])
+        lr_scheduler_d,lr_scheduler_g=self.scheduler(opt_d,opt_g)
         if self.config["sched"] != None:
             return [opt_d, opt_g], [lr_scheduler_d, lr_scheduler_g]
         else:
@@ -374,79 +426,91 @@ class TransGan(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         """training loop of the model, here all the data is passed forward to a gaussian
         This is the important part what is happening here. This is all the training we do"""
-        mask = batch[:, 90:].bool()
-        noise=torch.normal(torch.zeros(len(batch),device="cuda"),2*torch.exp(torch.tensor(-20*self.current_epoch/self.config["max_epochs"],device="cuda")))
-        batch = batch[:, :90]
+        
+        mask = batch[:, self.n_part*self.n_dim:self.n_part*self.n_dim+self.n_current].bool()
+        batch = batch[:, :self.n_current*self.n_dim]
        
         opt_d, opt_g = self.optimizers()
         if self.config["sched"]:
            sched_d, sched_g = self.lr_schedulers()
+           sched_d.step() 
+           sched_g.step() 
         # ### NF PART
         if self.config["sched"] != None:
-            self.log("lr_g", sched_g.get_last_lr()[-1], logger=True, on_epoch=False,on_step=True)
-            self.log("lr_d", sched_d.get_last_lr()[-1], logger=True, on_epoch=False,on_step=True)
+            self.log("Training/lr_g", sched_g.get_last_lr()[-1])
+            self.log("Training/lr_d", sched_d.get_last_lr()[-1])
 
     
         ### GAN PART
     
-        if self.config["sched"] != None:
-            sched_d.step()
-        batch = batch.reshape(len(batch), self.n_part, self.n_dim)
+        batch = batch.reshape(len(batch), self.n_current, self.n_dim)
         batch[mask]=0
         fake = self.sampleandscale(batch, mask, scale=False)
         
+        
+        
         pred_real = self.dis_net(batch, mask=mask)
         pred_fake = self.dis_net(fake.detach(), mask=mask)
-        if self.wgan:
-            # gradient_penalty = self.compute_gradient_penalty(self.dis_net, batch, fake.detach(), mask, 1)
-            gradient_penalty = self.compute_gradient_penalty2(batch, fake.detach(), pred_real, pred_fake,None)
-            self.log("gradient penalty", gradient_penalty, logger=True)
-            d_loss = -torch.mean(pred_real.view(-1)) + torch.mean(pred_fake.view(-1)) + gradient_penalty
-        else:
-            target_real = torch.ones_like(pred_real)
-            target_fake = torch.zeros_like(pred_fake)
-            pred = torch.vstack((pred_real, pred_fake))
-            target = torch.vstack((target_real, target_fake))
-            d_loss = nn.MSELoss()(pred, target).mean()
+        target_real = torch.ones_like(pred_real)
+        target_fake = torch.zeros_like(pred_fake)
+        pred = torch.vstack((pred_real, pred_fake))
+        target = torch.vstack((target_real, target_fake))
+        d_loss = self.mse(pred, target).mean()
         opt_d.zero_grad()
         self.manual_backward(d_loss)
 
         opt_d.step()
+        self.d_losses[self.global_step%5]=d_loss.detach()
+        if self.current_epoch % 5 == 0 and self.global_step%self.num_batches<3 and self.current_epoch > self.train_nf / 2:
+                self.plot.plot_scores(pred_real.detach().cpu().numpy(),pred_fake.detach().cpu().numpy(),train=True,step=self.current_epoch)
+                
+        if not self.train_gen and self.d_losses.mean()<0.1:
+            self.counter+=1
+            if self.counter>10:
+                self.train_gen=True
+                self.log("n_current",self.n_current)
+                print("start training gen with {} particles".format(self.n_current))
+        else:
+            self.counter=0
 
-        self.log("d_loss", d_loss, logger=True, prog_bar=False,on_step=True)
+        self.log("Training/d_loss", d_loss, logger=True, prog_bar=False,on_step=True)
         if self.global_step < 2:
             print("passed test disc")
-        
-        if (self.current_epoch > self.train_nf and self.global_step % self.freq_d < 2) or self.global_step <= 3 or "load_ckpt" in self.config.keys():
+
+        if self.train_gen or self.global_step <= 3:
             opt_g.zero_grad()
             fake = self.sampleandscale(batch, mask, scale=False)#~(mask.bool())
-            pred_fake = self.dis_net(fake, mask=mask)
-
-            target_real = torch.ones_like(pred_fake)
-            if self.wgan:
-                g_loss = -torch.mean(pred_fake.view(-1))
+            
+            if self.config["featurematching"]:
+            # gradient_penalty = self.compute_gradient_penalty(self.dis_net, batch, fake.detach(), mask, 1)
+                x,xx,xxx = self.dis_net(batch, mask=mask,feat=True)
+                y,yy,yyy = self.dis_net(fake, mask=mask,feat=True)
+                g_loss = self.mse(x.view(-1),y.view(-1))+self.mse(xx.view(-1),yy.view(-1))+self.mse(xxx.view(-1),yyy.view(-1))
             else:
-                g_loss = nn.MSELoss()((pred_fake.view(-1)), target_real.view(-1))
+                pred_fake = self.dis_net(fake, mask=mask)
+                target_real = torch.ones_like(pred_fake)
+                if self.wgan:
+                    g_loss = -torch.mean(pred_fake.view(-1))
+                else:
+                    g_loss = self.mse((pred_fake.view(-1)), target_real.view(-1))
             self.manual_backward(g_loss)
             if self.global_step > 10:
                 opt_g.step()
             else:
                 opt_g.zero_grad()
-            self.log("g_loss", g_loss, logger=True, prog_bar=False,on_step=True)
-            if self.config["sched"]!=None:
-                sched_g.step()
+            self.log("Training/g_loss", g_loss, logger=True, prog_bar=False,on_step=True)
+            
             if self.global_step < 3:
                 print("passed test gen")
             # Control plot train
-            if self.current_epoch % 5 == 0 and self.current_epoch > self.train_nf / 2:
-                self.plot.plot_scores(pred_real,pred_fake,train=True,step=self.global_step)
-                
+            
 
     def validation_step(self, batch, batch_idx):
         """This calculates some important metrics on the hold out set (checking for overtraining)"""
-        mask = batch[:, 90:].cpu().bool()
-        batch = batch[:, :90].cpu()
-        
+        #print("start val")
+        mask = batch[:, self.n_part*self.n_dim:self.n_part*self.n_dim+self.n_current].bool().cpu()
+        batch = batch[:, :self.n_current*self.n_dim].cpu()
+                
         self.dis_net.train()
         self.gen_net.train()
         self.flow.eval()
@@ -456,30 +520,37 @@ class TransGan(pl.LightningModule):
         self.dis_net = self.dis_net.cpu()
         self.gen_net = self.gen_net.cpu()
         
+        #print("start sampling")
         with torch.no_grad():
             # logprob = -self.flow.log_prob(batch).mean() / 90
-            batch = batch.reshape(len(batch),30,3)
-            gen, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch,mask_test, scale=True)#mask_test
+            batch = batch.reshape(len(batch),self.n_current,self.n_dim)
+
+            gen, fake_scaled, true_scaled, z_scaled = self.sampleandscale(batch,mask_test, 
+            scale=True)
+            #print("end sampling")
+            #mask_test
             batch[mask]=0
 
-           
+            #print("start scores")
             scores_real = self.sig(self.dis_net(batch, mask=mask))
             scores_fake = self.sig(self.dis_net(gen, mask=mask))
-            
+            #print("end scores")
         
         true_scaled[mask]=0
         fake_scaled[mask_test] = 0
         z_scaled[mask_test]  = 0
         # Reverse Standard Scaling (this has nothing to do with flows, it is a standard preprocessing step)
-        m_t = mass(true_scaled,self.config["canonical"])
-        m_gen = mass(z_scaled, self.config["canonical"])
-        m_c = mass(fake_scaled, self.config["canonical"])
+        m_t = mass(true_scaled)
+        m_gen = mass(z_scaled)
+        m_c = mass(fake_scaled)
         
-        for i in range(30):
+        for i in range(self.n_current):
             fake_scaled[fake_scaled[:, i,2] < 0, i,2] = 0
             z_scaled[z_scaled[:, i,2] < 0, i,2] = 0
         # Some metrics we track
+        #print("start metrics")
         cov, mmd = cov_mmd( true_scaled,fake_scaled, use_tqdm=False)
+        
         cov_nf, mmd_nf = cov_mmd(true_scaled,z_scaled,  use_tqdm=False)
         try:
             
@@ -490,16 +561,17 @@ class TransGan(pl.LightningModule):
         w1m_ = w1m(fake_scaled, true_scaled)[0]
         w1p_ = w1p(fake_scaled, true_scaled)[0]
         w1efp_ = w1efp(fake_scaled, true_scaled)[0]
-
-        if fpndv<0.08 and w1m_<0.001 and not self.refinement:
-            opt_nf,opt_d,opt_g=self.optimizers()
-            for g in opt_nf.param_groups:
-                g['lr'] *= 0.001
-            for g in opt_d.param_groups:
-                g['lr'] *= 0.1
-            for g in opt_g.param_groups:
-                g['lr'] *= 0.001
-            self.refinement=True
+        
+        #print("end metrics")
+        # if fpndv<0.08 and w1m_<0.001 and not self.refinement:
+        #     opt_nf,opt_d,opt_g=self.optimizers()
+        #     for g in opt_nf.param_groups:
+        #         g['lr'] *= 0.001
+        #     for g in opt_d.param_groups:
+        #         g['lr'] *= 0.1
+        #     for g in opt_g.param_groups:
+        #         g['lr'] *= 0.001
+        #     self.refinement=True
         self.w1ms.append(w1m_)
         self.fpnds.append(fpndv)
         temp = {"val_fpnd": fpndv,"val_mmd": mmd,"val_cov": cov,"val_w1m": w1m_,
@@ -507,41 +579,63 @@ class TransGan(pl.LightningModule):
         print("epoch {}: ".format(self.current_epoch), temp)
         
         
-        if self.hyperopt and self.global_step > 3:
-            try:
-                self._results(temp)
-            except:
-                print("error in results")
-            if (fpndv<self.fpnds).all():             
-                summary = self._summary(temp)
         
-        self.log("hp_metric", w1m_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_w1m", w1m_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_w1p", w1p_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_w1efp", w1efp_, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        #print("start logging")
+        self.log("hp_metric", w1m_,)
 
-        self.log("val_cov", cov, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.log("val_cov_nf", cov_nf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.log("val_fpnd", fpndv, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.log("val_mmd", mmd, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.log("val_mmd_nf", mmd_nf, prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.plot = plotting(model=self,gen=fake_scaled.reshape(-1,self.n_part*self.n_dim),true=true_scaled.reshape(-1,self.n_part*self.n_dim),config=self.config,step=self.global_step,nf=z_scaled.reshape(-1,self.n_part*self.n_dim),
-        logger=self.logger.experiment,p=self.config["parton"])
-        self.plot.plot_scores(scores_real,scores_fake,train=False,step=self.global_step)
+        self.log("Validation/w1m", w1m_,)
+        self.log("Validation/w1p", w1p_,)
+        self.log("Validation/w1efp", w1efp_,)
+        self.log("Validation/cov", cov,  )
+        self.log("Validation/cov_nf", cov_nf,  )
+        self.log("Validation/fpnd", fpndv,  )
+        self.log("Validation/mmd", mmd,  )
+        self.log("Validation/mmd_nf", mmd_nf,  )
+        #print("end logging")
+        self.plot = plotting_point_cloud(model=self,gen=fake_scaled.reshape(-1,self.n_current,self.n_dim),true=true_scaled.reshape(-1,self.n_current,self.n_dim),config=self.config,step=self.global_step,
+        logger=self.logger, n=self.n_current,p=self.config["parton"])#,nf=z_scaled.reshape(-1,self.n_current,self.n_dim)
+        # self.plot.plot_scores(scores_real,scores_fake,train=True,step=self.global_step)
         self.plot.plot_mom(self.global_step)
         try:
-            self.plot.plot_mass(m=m_c.cpu().numpy(), m_t=m_t.cpu().numpy(), save=None, bins=50, quantile=True, plot_vline=False)
+            self.plot.plot_mass(save=None, bins=50)
             # self.plot.plot_2d(save=True)
         #     self.plot.var_part(true=true[:,:self.n_dim],gen=gen_corr[:,:self.n_dim],true_n=n_true,gen_n=n_gen_corr,
         #                          m_true=m_t,m_gen=m_test ,save=True)
+            self.plot.plot_scores(scores_real.reshape(-1).detach().cpu().numpy(), scores_fake.reshape(-1).detach().cpu().numpy(), train=False, step=self.current_epoch)
         except Exception as e:
             traceback.print_exc()
-        if (np.array([self.fpnds]) > 30).all() and self.global_step > 300000:
-            print("no convergence, stop training")
+        # if (np.array([self.fpnds]) > 30).all() and self.global_step > 300000:
+        #     print("no convergence, stop training")
              
-            summary = self._summary(temp)
-            raise
+        #     summary = self._summary(temp)
+        #     raise
 
         self.flow = self.flow.to("cuda")
         self.gen_net = self.gen_net.to("cuda")
         self.dis_net = self.dis_net.to("cuda")
+        if self.global_step>20000 and self.n_current==2:
+            print("not converging, n:",self.n_current)
+            raise
+        if self.global_step>30000 and self.n_current<5:
+            print("not converging, n:",self.n_current)
+            raise
+        if self.global_step>300000 and self.n_current<30:
+            print("not converging, n:",self.n_current)
+            raise
+        if cov>0.45 and w1m_<0.005 :
+            self.n_current+=1
+            self.n_current=min(self.n_current,30)
+            # self.trainer.optimizers[1] = torch.optim.Adam(self.dis_net.parameters(),lr=self.config["lr_g"], betas=(0, 0.9))
+            # self.trainer.optimizers[0] = torch.optim.Adam(self.gen_net.parameters(),lr=self.config["lr_g"], betas=(0, 0.9))
+            self.train_gen = False
+            self.counter=0
+            self.trainer.accelerator.setup(self)
+            
+            print("number partiacles set to to ",self.n_current)
+        # if self.hyperopt and self.global_step > 3:
+            # try:
+            #     self._results(temp)
+            # except:
+            #     print("error in results")
+            # if (fpndv<self.fpnds).all():             
+            #     summary = self._summary(temp)
